@@ -324,7 +324,59 @@ Local execution (no API costs), privacy-preserving, CodeLlama specialization, ac
 
 ---
 
-## 7. Conclusion
+## 7. Chatbot Integration for Interactive Code Generation
+
+### 7.1 Conversational Interface Design
+
+Recent developments in screenshot-to-code systems have introduced conversational interfaces to enhance user interaction and code refinement. A chatbot layer enables:
+
+**User Guidance**: Users can ask clarifying questions about detected elements, request specific styling, or provide context about the screenshot's purpose.
+
+**Iterative Refinement**: Rather than one-shot code generation, users can engage in dialogue to refine output:
+- "Make the button larger"
+- "Change the color scheme to dark mode"
+- "Add more spacing between elements"
+
+**Context Preservation**: Chatbot maintains conversation history, allowing the system to understand user preferences and apply them consistently across multiple generations.
+
+### 7.2 Architecture Enhancement
+
+Our system extends the three-stage pipeline with a chatbot layer:
+
+**Stage 0: User Interaction (New)**
+- Chatbot receives user queries and screenshots
+- Maintains conversation context
+- Translates natural language requests to system parameters
+
+**Stage 1-3**: Existing pipeline (OpenCV → SQLite → Ollama)
+- Enhanced with user preferences from chatbot
+- Generates code based on both visual analysis and user guidance
+
+**Stage 4: Feedback Loop (New)**
+- Generated code presented to user via chatbot
+- User can request modifications
+- System learns from feedback for future generations
+
+### 7.3 Implementation Benefits
+
+**Accessibility**: Non-technical users can interact naturally without understanding code generation internals.
+
+**Accuracy Improvement**: User feedback helps correct misclassifications and refine templates.
+
+**Transparency**: Chatbot explains decisions ("I detected this as a button because...").
+
+**Flexibility**: Handles edge cases and custom requirements through dialogue.
+
+### 7.4 Relevance to Our Project
+
+The chatbot integration validates our modular architecture. By adding a conversational layer without modifying core detection/generation stages, we demonstrate:
+- Extensibility of the three-stage pipeline
+- Separation of concerns (UI interaction vs. code generation)
+- Practical applicability for educational and professional use
+
+---
+
+## 8. Conclusion
 
 This survey examined five approaches to screenshot-to-code generation, revealing fundamental tradeoffs between accuracy and accessibility. State-of-the-art systems like GPT-4 Vision achieve 80-90% accuracy but require expensive APIs that cost $0.01-0.03 per screenshot. Deep learning approaches like pix2code achieve 77% accuracy but demand extensive training infrastructure and labeled datasets. Our project addresses these limitations through a carefully designed hybrid architecture that balances practical performance with educational accessibility.
 
@@ -336,7 +388,7 @@ The system serves educational and rapid prototyping contexts where accessibility
 
 ---
 
-## 8. Summary Table
+## 9. Summary Table
 
 | Paper | Year | Method | Accuracy | Cost | Training | Relevance |
 |-------|------|--------|----------|------|----------|-----------|
