@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { signInWithPopup } from 'firebase/auth';
+import { auth, googleProvider } from './firebase';
 
 const BUBBLE_COUNT = 6;
 const randomBetween = (a, b) => a + Math.random() * (b - a);
@@ -17,8 +19,20 @@ export default function App() {
   const timeRef = useRef(0);
   const [screen, setScreen] = useState("home");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const messagesEndRef = useRef(null);
+
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      setUser(result.user);
+      setIsLoggedIn(true);
+      setScreen("chat");
+    } catch (error) {
+      console.error("Login error:", error);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -192,44 +206,27 @@ export default function App() {
           alignItems: "center", justifyContent: "center", height: "100%",
           color: "#1c1e21", gap: "2rem"
         }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700, color: "#1877f2" }}>Login</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.2rem", width: "320px" }}>
-            <input
-              type="email"
-              placeholder="Email"
-              style={{
-                padding: "0.85rem", borderRadius: "8px", border: "1px solid #dddfe2",
-                fontSize: "0.95rem", outline: "none", transition: "all 0.2s",
-                background: "#ffffff", color: "#1c1e21"
-              }}
-              onFocus={(e) => { e.target.style.borderColor = "#1877f2"; e.target.style.boxShadow = "0 0 0 3px rgba(24, 119, 242, 0.1)"; }}
-              onBlur={(e) => { e.target.style.borderColor = "#dddfe2"; e.target.style.boxShadow = "none"; }}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              style={{
-                padding: "0.85rem", borderRadius: "8px", border: "1px solid #dddfe2",
-                fontSize: "0.95rem", outline: "none", transition: "all 0.2s",
-                background: "#ffffff", color: "#1c1e21"
-              }}
-              onFocus={(e) => { e.target.style.borderColor = "#1877f2"; e.target.style.boxShadow = "0 0 0 3px rgba(24, 119, 242, 0.1)"; }}
-              onBlur={(e) => { e.target.style.borderColor = "#dddfe2"; e.target.style.boxShadow = "none"; }}
-            />
-            <button
-              onClick={() => { setIsLoggedIn(true); setScreen("chat"); }}
-              style={{
-                padding: "0.85rem", borderRadius: "8px", border: "none",
-                background: "#1877f2", color: "white", fontSize: "1rem",
-                fontWeight: 600, cursor: "pointer", transition: "all 0.3s",
-                boxShadow: "0 4px 15px rgba(24, 119, 242, 0.3)"
-              }}
-              onMouseEnter={(e) => { e.target.style.background = "#166fe5"; e.target.style.boxShadow = "0 6px 20px rgba(24, 119, 242, 0.4)"; }}
-              onMouseLeave={(e) => { e.target.style.background = "#1877f2"; e.target.style.boxShadow = "0 4px 15px rgba(24, 119, 242, 0.3)"; }}
-            >
-              Login
-            </button>
-          </div>
+          <div style={{ fontSize: "2rem", fontWeight: 700, color: "#1877f2", marginBottom: "1rem" }}>Login</div>
+          <button
+            onClick={handleGoogleLogin}
+            style={{
+              padding: "0.85rem 2rem", borderRadius: "8px", border: "1px solid #dddfe2",
+              background: "#ffffff", color: "#1c1e21", fontSize: "0.95rem",
+              fontWeight: 600, cursor: "pointer", transition: "all 0.3s",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)"
+            }}
+            onMouseEnter={(e) => { e.target.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; }}
+            onMouseLeave={(e) => { e.target.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)"; }}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18">
+              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+              <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/>
+              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z"/>
+            </svg>
+            Sign in with Google
+          </button>
           <button
             onClick={() => setScreen("home")}
             style={{
