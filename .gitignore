@@ -1,0 +1,6 @@
+# Firebase and Google Auth
+bubble-app/src/firebase.js
+client_secret.json
+google-services.json
+*.keystore
+*.jks

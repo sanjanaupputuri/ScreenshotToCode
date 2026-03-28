@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
 
 const BUBBLE_COUNT = 6;
 const randomBetween = (a, b) => a + Math.random() * (b - a);
@@ -24,14 +22,9 @@ export default function App() {
   const messagesEndRef = useRef(null);
 
   const handleGoogleLogin = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      setUser(result.user);
-      setIsLoggedIn(true);
-      setScreen("chat");
-    } catch (error) {
-      console.error("Login error:", error);
-    }
+    // TODO: Implement new Firebase auth after regenerating credentials
+    setIsLoggedIn(true);
+    setScreen("chat");
   };
 
   const scrollToBottom = () => {
