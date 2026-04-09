@@ -16,7 +16,7 @@ edges = cv2.Canny(blur,50,150)
 kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(12,12))
 dilated = cv2.dilate(edges,kernel,iterations=2)
 
-# ---------- CONTOUR DETECTION ----------
+
 contours,_ = cv2.findContours(dilated,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
 
 components=[]
