@@ -2,9 +2,9 @@ import cv2
 import pytesseract
 import numpy as np
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
-image = cv2.imread(r"C:\Users\LENOVO\Pictures\Screenshots\Screenshot 2026-03-12 135328.png")
+image = cv2.imread("/mnt/c/Users/LENOVO/Pictures/Screenshots/Screenshot 2026-03-12 135328.png")
 
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
