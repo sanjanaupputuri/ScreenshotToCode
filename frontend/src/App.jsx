@@ -42,38 +42,39 @@ export default function App() {
     scrollToBottom();
   }, [messages]);
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const userMsg = { text: "Screenshot uploaded", sender: "user", image: event.target?.result };
-        setMessages([...messages, userMsg]);
+      const userMsg = { text: "Screenshot uploaded", sender: "user", image: URL.createObjectURL(file) };
+      setMessages([...messages, userMsg]);
+      
+      try {
+        const formData = new FormData();
+        formData.append('image', file);
         
-        setTimeout(() => {
-          const generatedCode = `<div class="container">
-  <header class="navbar">
-    <h1>Your App</h1>
-  </header>
-  <main class="content">
-    <section class="hero">
-      <h2>Welcome</h2>
-      <p>Your generated code here</p>
-    </section>
-  </main>
-</div>
-
-<style>
-  .container { max-width: 1200px; margin: 0 auto; }
-  .navbar { background: #333; color: white; padding: 1rem; }
-  .content { padding: 2rem; }
-  .hero { text-align: center; }
-</style>`;
-          const botMsg = { text: "Code generated successfully!", sender: "bot", code: generatedCode };
+        const token = await user.getIdToken();
+        const response = await fetch('http://localhost:3001/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          const botMsg = { text: "Code generated successfully!", sender: "bot", code: result.code };
           setMessages(prev => [...prev, botMsg]);
-        }, 1500);
-      };
-      reader.readAsDataURL(file);
+        } else {
+          const errorMsg = { text: "Error generating code. Please try again.", sender: "bot" };
+          setMessages(prev => [...prev, errorMsg]);
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        const errorMsg = { text: "Error uploading image. Please try again.", sender: "bot" };
+        setMessages(prev => [...prev, errorMsg]);
+      }
     }
   };
 
