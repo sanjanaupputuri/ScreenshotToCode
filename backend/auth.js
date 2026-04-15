@@ -1,32 +1,28 @@
 import admin from 'firebase-admin';
 
-// Initialize Firebase Admin (you'll need to add your service account key)
-// For now, we'll use a simplified version that accepts any token
-const firebaseConfig = {
-  projectId: "screenshottocode-41999"
-};
+let initialized = false;
 
-admin.initializeApp(firebaseConfig);
+function initFirebase() {
+  if (initialized) return;
+  try {
+    admin.initializeApp({ projectId: "screenshottocode-41999" });
+    initialized = true;
+  } catch (e) {
+    // already initialized
+    initialized = true;
+  }
+}
 
 export async function verifyToken(req, res, next) {
   try {
+    initFirebase();
     const token = req.headers.authorization?.split(' ')[1];
-    
-    if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
-    }
-    
-    // For development, we'll mock the user verification
-    // In production, use: const decodedToken = await admin.auth().verifyIdToken(token);
-    const mockUser = {
-      uid: 'user_' + Math.random().toString(36).substr(2, 9),
-      email: 'user@example.com',
-      name: 'Test User'
-    };
-    
-    req.user = mockUser;
+    if (!token) return res.status(401).json({ error: 'No token provided' });
+
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.user = { uid: decoded.uid, email: decoded.email, name: decoded.name };
     next();
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(401).json({ error: 'Invalid token: ' + error.message });
   }
 }

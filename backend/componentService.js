@@ -1,177 +1,611 @@
-import { classifyElement, getComponentTemplate, getColorClass, getSpacingClass } from './database-json.js';
+import { enrichDetectedElements } from './database.js';
 
-export class ComponentService {
-  
-  static async processElement(elementData) {
-    try {
-      // Classify the element based on its properties
-      const classification = await classifyElement(elementData);
-      
-      if (!classification) {
-        return this.createFallbackComponent(elementData);
-      }
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-      // Get the template for this component
-      const template = await getComponentTemplate(classification.id);
-      
-      if (!template) {
-        return this.createFallbackComponent(elementData);
-      }
+const CONTROL_LABEL_PATTERN = /(public|private|pin|watch|fork|star|main|code|add file|go to file|search|type|upload|download|edit|new|create|save|cancel|apply|close|open)/i;
+const CHIP_BADGE_PATTERN = /^(public|private|draft|open|closed|beta|new)$/i;
+const INPUT_LABEL_PATTERN = /(search|type|enter|email|name|password|phone|address|query|username)/i;
 
-      // Generate styling classes
-      const classes = await this.generateClasses(elementData);
-      
-      // Substitute placeholders in template
-      const html = this.substituteTemplate(template.html_template, {
-        classes: classes.join(' '),
-        text: elementData.text || 'Sample Text',
-        content: elementData.content || '',
-        src: elementData.src || 'https://via.placeholder.com/150',
-        alt: elementData.alt || 'Image'
-      });
+function px(value, fallback = 0) {
+  const numeric = Number.isFinite(value) ? value : fallback;
+  return `${Math.max(0, Math.round(numeric))}px`;
+}
 
-      return {
-        html,
-        css: template.css_template || '',
-        component: classification.name,
-        category: classification.category,
-        confidence: classification.score
-      };
+function styleString(declarations) {
+  return Object.entries(declarations)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}:${value}`)
+    .join(';');
+}
 
-    } catch (error) {
-      console.error('Error processing element:', error);
-      return this.createFallbackComponent(elementData);
+function isTransparent(color) {
+  return !color || color === 'transparent' || color === 'none';
+}
+
+function hexToRgb(color) {
+  if (!color || color[0] !== '#' || (color.length !== 7 && color.length !== 4)) return null;
+  const normalized = color.length === 4
+    ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+    : color;
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function relativeLuminance(color) {
+  const rgb = hexToRgb(color);
+  if (!rgb) return 1;
+  const channels = [rgb.r, rgb.g, rgb.b].map((value) => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(left, right) {
+  const l1 = relativeLuminance(left);
+  const l2 = relativeLuminance(right);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function colorDistance(left, right) {
+  const leftRgb = hexToRgb(left);
+  const rightRgb = hexToRgb(right);
+  if (!leftRgb || !rightRgb) return Infinity;
+  const dr = leftRgb.r - rightRgb.r;
+  const dg = leftRgb.g - rightRgb.g;
+  const db = leftRgb.b - rightRgb.b;
+  return Math.sqrt((dr * dr) + (dg * dg) + (db * db));
+}
+
+function bestContrastText(background) {
+  return contrastRatio(background, '#ffffff') >= contrastRatio(background, '#111827') ? '#ffffff' : '#111827';
+}
+
+function normalizeElement(raw, index) {
+  const kind = raw.kind || 'shape';
+  const semanticType = raw.semantic_type || raw.type || kind;
+  const textRole = raw.text_role || (kind === 'text' ? 'body' : 'container');
+  const background = isTransparent(raw.background_color) ? 'transparent' : raw.background_color;
+  const border = Number(raw.border_width) > 0 && !isTransparent(raw.border_color)
+    ? `${Math.round(raw.border_width)}px solid ${raw.border_color}`
+    : 'none';
+  const fontSize =
+    textRole === 'title' ? Math.max(Number(raw.font_size) || 14, 18) :
+    textRole === 'muted' ? Math.max(11, (Number(raw.font_size) || 12) - 1) :
+    Number(raw.font_size) || 14;
+  const fontWeight =
+    textRole === 'title' ? Math.max(Number(raw.font_weight) || 600, 700) :
+    textRole === 'nav' ? Math.max(Number(raw.font_weight) || 500, 600) :
+    Number(raw.font_weight) || 400;
+  const textColor =
+    textRole === 'muted' ? '#57606a' :
+    (isTransparent(raw.text_color) ? '#24292f' : raw.text_color);
+  const parentBackground = raw.parent_background_color || null;
+  const needsContrastCorrection =
+    raw.kind === 'text' &&
+    parentBackground &&
+    !isTransparent(parentBackground) &&
+    (
+      isTransparent(raw.text_color) ||
+      contrastRatio(textColor, parentBackground) < 1.28 ||
+      colorDistance(textColor, parentBackground) < 26
+    );
+  const correctedTextColor =
+    needsContrastCorrection
+      ? bestContrastText(parentBackground)
+      : textColor;
+
+  const sourceId = Number.isFinite(raw.id) ? Number(raw.id) : index;
+
+  return {
+    id: `${kind}-${sourceId}`,
+    sourceId,
+    kind,
+    type: raw.type || kind,
+    semanticType,
+    textRole,
+    text: raw.text || '',
+    x: Number(raw.x) || 0,
+    y: Number(raw.y) || 0,
+    width: Number(raw.width) || 1,
+    height: Number(raw.height) || 1,
+    x_pct: Number(raw.x_pct) || 0,
+    y_pct: Number(raw.y_pct) || 0,
+    w_pct: Number(raw.w_pct) || 0.01,
+    h_pct: Number(raw.h_pct) || 0.01,
+    background,
+    border,
+    borderRadius: Number(raw.border_radius) || 0,
+    textColor: correctedTextColor,
+    fontSize,
+    fontWeight,
+    textAlign: raw.text_align || 'left',
+    zIndex: Number(raw.z_index) || 1,
+    parentId: raw.parent_id ?? null,
+    parentType: raw.parent_type ?? null,
+    rowId: raw.row_id ?? null,
+    layoutHint: raw.layout_hint || null,
+  };
+}
+
+function applyParentAnchoring(elements, image) {
+  const bySourceId = new Map(elements.map((element) => [element.sourceId, element]));
+  const imageWidth = Number(image.width) || 1;
+  const imageHeight = Number(image.height) || 1;
+
+  for (const element of elements) {
+    if (element.kind !== 'text' || element.parentId === null || element.parentId === undefined) continue;
+    const parent = bySourceId.get(element.parentId);
+    if (!parent || parent.kind !== 'shape') continue;
+
+    const semantic = parent.semanticType || parent.type;
+    const centerY = parent.y + (parent.height - element.height) / 2;
+    const padX = Math.max(6, Math.round(parent.height * 0.25));
+
+    if (semantic === 'button' || semantic === 'chip') {
+      element.x = parent.x;
+      element.width = parent.width;
+      element.textAlign = 'center';
+      element.y = Math.round(centerY);
+      element.layoutHint = 'fill-center';
+      element.x_pct = Number((element.x / imageWidth).toFixed(6));
+      element.y_pct = Number((element.y / imageHeight).toFixed(6));
+      element.w_pct = Number((element.width / imageWidth).toFixed(6));
+      continue;
+    }
+
+    if (semantic === 'input') {
+      element.x = parent.x + padX;
+      element.width = Math.max(20, parent.width - (padX * 2));
+      element.y = Math.round(centerY);
+      element.textAlign = 'left';
+      element.layoutHint = 'input-inline';
+      element.x_pct = Number((element.x / imageWidth).toFixed(6));
+      element.y_pct = Number((element.y / imageHeight).toFixed(6));
+      element.w_pct = Number((element.width / imageWidth).toFixed(6));
+      continue;
+    }
+
+    if (semantic === 'toolbar') {
+      element.y = Math.round(centerY);
+      element.layoutHint = 'center-y';
+      element.x_pct = Number((element.x / imageWidth).toFixed(6));
+      element.y_pct = Number((element.y / imageHeight).toFixed(6));
     }
   }
+}
 
-  static async generateClasses(elementData) {
-    const classes = [];
-    
-    // Add color class if available
-    if (elementData.color) {
-      const colorClass = await getColorClass(elementData.color);
-      if (colorClass) {
-        classes.push(colorClass.tailwind_class);
-      }
-    }
-
-    // Add spacing classes based on dimensions
-    if (elementData.width) {
-      const spacingClass = await getSpacingClass(Math.min(elementData.width / 4, 32));
-      if (spacingClass) {
-        classes.push(spacingClass.tailwind_class.replace('p-', 'px-'));
-      }
-    }
-
-    if (elementData.height) {
-      const spacingClass = await getSpacingClass(Math.min(elementData.height / 4, 16));
-      if (spacingClass) {
-        classes.push(spacingClass.tailwind_class.replace('p-', 'py-'));
-      }
-    }
-
-    // Add default styling
-    classes.push('rounded', 'border');
-
-    return classes;
-  }
-
-  static substituteTemplate(template, values) {
-    let result = template;
-    
-    Object.entries(values).forEach(([key, value]) => {
-      const placeholder = `{{${key}}}`;
-      result = result.replace(new RegExp(placeholder, 'g'), value);
-    });
-
-    return result;
-  }
-
-  static createFallbackComponent(elementData) {
-    const classes = ['p-4', 'border', 'rounded'];
-    
+function getRelativeMetrics(element, frame) {
+  if (!frame) {
     return {
-      html: `<div class="${classes.join(' ')}">${elementData.text || 'Content'}</div>`,
-      css: '',
-      component: 'fallback_div',
-      category: 'layout',
-      confidence: 0
+      left: element.x,
+      top: element.y,
+      width: element.width,
+      height: element.height,
     };
   }
 
-  static async processElements(elementsArray) {
-    const processedElements = [];
-    
-    for (const element of elementsArray) {
-      const processed = await this.processElement(element);
-      processedElements.push({
-        ...processed,
-        position: {
-          x: element.x,
-          y: element.y,
-          width: element.width,
-          height: element.height
-        }
-      });
+  return {
+    left: Math.max(0, element.x - frame.x),
+    top: Math.max(0, element.y - frame.y),
+    width: Math.max(1, element.width),
+    height: Math.max(1, element.height),
+  };
+}
+
+function renderBackground(element) {
+  return `<div class="screen-bg" style="${styleString({
+    position: 'absolute',
+    inset: '0',
+    background: element.background,
+    'z-index': element.zIndex,
+  })}"></div>`;
+}
+
+function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Infinity) {
+  const normalized = String(text || '').replace(/\r/g, '');
+  const lines = normalized.split('\n');
+  const weightFactor = fontWeight >= 700 ? 0.62 : fontWeight >= 600 ? 0.59 : 0.56;
+  const spaceWidth = fontSize * 0.33;
+
+  let totalLines = 0;
+  let widestLine = 0;
+
+  for (const rawLine of lines) {
+    const words = rawLine.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      totalLines += 1;
+      continue;
     }
 
-    return processedElements;
-  }
-
-  static generateLayoutStructure(processedElements) {
-    // Sort elements by position (top to bottom, left to right)
-    const sorted = processedElements.sort((a, b) => {
-      if (Math.abs(a.position.y - b.position.y) < 20) {
-        return a.position.x - b.position.x;
-      }
-      return a.position.y - b.position.y;
-    });
-
-    // Group elements into rows
-    const rows = [];
-    let currentRow = [];
-    let currentY = -1;
-
-    sorted.forEach(element => {
-      if (currentY === -1 || Math.abs(element.position.y - currentY) < 20) {
-        currentRow.push(element);
-        currentY = element.position.y;
+    let currentWidth = 0;
+    for (const word of words) {
+      const wordWidth = Math.max(fontSize * 0.5, word.length * fontSize * weightFactor);
+      const nextWidth = currentWidth === 0 ? wordWidth : currentWidth + spaceWidth + wordWidth;
+      if (nextWidth > maxWidth && currentWidth > 0 && Number.isFinite(maxWidth)) {
+        widestLine = Math.max(widestLine, currentWidth);
+        totalLines += 1;
+        currentWidth = wordWidth;
       } else {
-        if (currentRow.length > 0) {
-          rows.push(currentRow);
-        }
-        currentRow = [element];
-        currentY = element.position.y;
+        currentWidth = nextWidth;
       }
-    });
-
-    if (currentRow.length > 0) {
-      rows.push(currentRow);
     }
 
-    return rows;
+    widestLine = Math.max(widestLine, currentWidth);
+    totalLines += 1;
   }
 
-  static generateHTML(processedElements) {
-    const rows = this.generateLayoutStructure(processedElements);
-    
-    let html = '<div class="container mx-auto p-4">\n';
-    
-    rows.forEach(row => {
-      if (row.length === 1) {
-        html += `  ${row[0].html}\n`;
-      } else {
-        html += '  <div class="flex gap-4">\n';
-        row.forEach(element => {
-          html += `    ${element.html}\n`;
-        });
-        html += '  </div>\n';
-      }
+  return {
+    lineCount: Math.max(1, totalLines),
+    widestLine,
+  };
+}
+
+function fitTextSize(text, preferredSize, maxWidth, maxHeight, fontWeight = 400, minSize = 9) {
+  let size = Math.max(minSize, Math.round(preferredSize || 14));
+  const targetWidth = Math.max(8, maxWidth || 8);
+  const targetHeight = Math.max(size, maxHeight || size);
+
+  while (size > minSize) {
+    const metrics = textMetricsForEstimate(text, size, fontWeight, targetWidth);
+    const lineHeight = size * 1.18;
+    if (metrics.widestLine <= targetWidth + 0.5 && (metrics.lineCount * lineHeight) <= targetHeight + 0.5) {
+      return size;
+    }
+    size -= 1;
+  }
+
+  return Math.max(minSize, size);
+}
+
+function textBoxForElement(element, metrics, frame = null) {
+  const parentWidth = frame?.width || metrics.width;
+  const parentHeight = frame?.height || metrics.height;
+
+  if (element.layoutHint === 'fill-center') {
+    return {
+      width: Math.max(12, parentWidth * 0.82),
+      height: Math.max(12, parentHeight * 0.72),
+    };
+  }
+
+  if (element.layoutHint === 'input-inline') {
+    return {
+      width: Math.max(12, parentWidth - Math.max(12, parentHeight * 0.55)),
+      height: Math.max(12, parentHeight * 0.7),
+    };
+  }
+
+  return {
+    width: Math.max(8, metrics.width),
+    height: Math.max(8, Math.max(metrics.height, element.fontSize * 1.2)),
+  };
+}
+
+function inlineTextFromChildren(children = []) {
+  const textChildren = children.filter((child) => child.kind === 'text' && child.text?.trim());
+  return textChildren.map((child) => child.text.trim()).join(' ').trim();
+}
+
+function renderDetachedChildren(children, childrenByParent, frame = null) {
+  return children.map((child) => {
+    if (child.kind === 'text') {
+      return renderText({
+        ...child,
+        layoutHint: null,
+        textAlign: child.textAlign === 'center' ? 'left' : child.textAlign,
+      }, frame);
+    }
+    return renderNode(child, childrenByParent, frame);
+  }).join('');
+}
+
+function renderInputControl(element, textValue) {
+  const padX = Math.max(10, Math.round(element.height * 0.25));
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width - (padX * 2), element.height * 0.7, element.fontWeight || 400, 10);
+  return `<input type="text" value="" placeholder="${escapeHtml(textValue)}" readonly style="${styleString({
+    position: 'absolute',
+    left: px(element.x),
+    top: px(element.y),
+    width: px(element.width),
+    height: px(element.height),
+    padding: `0 ${px(padX)}`,
+    color: element.textColor,
+    'font-size': px(fontSize),
+    'font-weight': element.fontWeight,
+    'line-height': '1.2',
+    background: element.background,
+    border: element.border,
+    'border-radius': px(element.borderRadius),
+    outline: 'none',
+    'z-index': element.zIndex,
+  })}" />`;
+}
+
+function renderInlineControl(element, textValue, tagName = 'button') {
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.82, element.height * 0.72, element.fontWeight || 600, 10);
+  return `<${tagName} ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
+    position: 'absolute',
+    left: px(element.x),
+    top: px(element.y),
+    width: px(element.width),
+    height: px(element.height),
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    padding: '0 8%',
+    color: element.textColor,
+    'font-size': px(fontSize),
+    'font-weight': element.fontWeight,
+    'line-height': '1.18',
+    'text-align': 'center',
+    background: element.background,
+    border: element.border,
+    'border-radius': px(element.borderRadius),
+    'z-index': element.zIndex,
+    overflow: 'hidden',
+  })}">${escapeHtml(textValue)}</${tagName}>`;
+}
+
+function renderShape(element, content, frame = null, tagName = 'div') {
+  const metrics = getRelativeMetrics(element, frame);
+  const radius = element.semanticType === 'toolbar'
+    ? 0
+    : element.semanticType === 'avatar'
+      ? Math.max(element.width, element.height)
+      : element.semanticType === 'icon'
+        ? Math.max(element.borderRadius, 6)
+        : element.borderRadius;
+  const overflow = element.semanticType === 'panel' || element.semanticType === 'toolbar' ? 'visible' : 'hidden';
+  return `<${tagName} class="screen-shape screen-${element.type}" ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
+    position: 'absolute',
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
+    background: element.background,
+    border: element.border,
+    'border-radius': px(radius),
+    overflow,
+    'z-index': element.zIndex,
+  })}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${content || ''}</${tagName}>`;
+}
+
+function renderText(element, frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
+  const box = textBoxForElement(element, metrics, frame);
+  const fittedFontSize = fitTextSize(element.text, element.fontSize, box.width, box.height, element.fontWeight, 9);
+  const baseStyle = {
+    position: 'absolute',
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    'min-height': px(metrics.height),
+    color: element.textColor,
+    'font-size': px(fittedFontSize),
+    'font-weight': element.fontWeight,
+    'line-height': '1.18',
+    'text-align': element.textAlign,
+    'white-space': 'pre-wrap',
+    'word-break': 'break-word',
+    overflow: 'hidden',
+    background: 'transparent',
+    border: 'none',
+    'z-index': element.zIndex,
+  };
+
+  if (element.layoutHint === 'fill-center') {
+    delete baseStyle.left;
+    delete baseStyle.top;
+    delete baseStyle.width;
+    delete baseStyle['min-height'];
+    Object.assign(baseStyle, {
+      inset: '0',
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      padding: '0 8%',
+      'text-align': 'center',
     });
-    
-    html += '</div>';
-    
-    return html;
+  } else if (element.layoutHint === 'input-inline') {
+    baseStyle.top = '50%';
+    baseStyle.transform = 'translateY(-50%)';
+    baseStyle['min-height'] = px(element.height);
+  } else if (element.layoutHint === 'center-y') {
+    baseStyle.top = '50%';
+    baseStyle.transform = 'translateY(-50%)';
+  }
+
+  return `<div class="screen-text" style="${styleString(baseStyle)}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${escapeHtml(element.text)}</div>`;
+}
+
+function buildHierarchy(elements) {
+  const bySourceId = new Map(elements.map((element) => [element.sourceId, element]));
+  const childrenByParent = new Map();
+  const roots = [];
+
+  for (const element of elements) {
+    const parent = element.parentId !== null && element.parentId !== undefined
+      ? bySourceId.get(element.parentId)
+      : null;
+
+    if (parent && parent.kind === 'shape') {
+      const siblings = childrenByParent.get(parent.sourceId) || [];
+      siblings.push(element);
+      childrenByParent.set(parent.sourceId, siblings);
+      continue;
+    }
+
+    roots.push(element);
+  }
+
+  const sortNodes = (items = []) => items.sort((left, right) => (
+    (left.zIndex - right.zIndex) ||
+    (left.y - right.y) ||
+    (left.x - right.x)
+  ));
+
+  for (const [parentId, children] of childrenByParent.entries()) {
+    childrenByParent.set(parentId, sortNodes(children));
+  }
+
+  return {
+    roots: sortNodes(roots),
+    childrenByParent,
+  };
+}
+
+function renderNode(element, childrenByParent, frame = null) {
+  if (element.kind === 'background') return renderBackground(element);
+  if (element.kind === 'text') return renderText(element, frame);
+
+  const children = childrenByParent.get(element.sourceId) || [];
+  const inlineText = inlineTextFromChildren(children);
+  const inlineTextNode = children.find((child) => child.kind === 'text');
+
+  if (children.length === 0) {
+    if (
+      element.type === 'shape' ||
+      element.semanticType === 'shape' ||
+      element.semanticType === 'button' ||
+      element.semanticType === 'chip'
+    ) {
+      return '';
+    }
+    if (element.semanticType === 'input' && element.width < 260) {
+      return '';
+    }
+  }
+
+  if (
+    element.semanticType === 'chip' &&
+    inlineText &&
+    (!CHIP_BADGE_PATTERN.test(inlineText.trim()) || inlineText.split(/\s+/).length > 2 || element.width > 120)
+  ) {
+    return renderDetachedChildren(children, childrenByParent, frame);
+  }
+
+  if (element.semanticType === 'input' && inlineText && !INPUT_LABEL_PATTERN.test(inlineText)) {
+    return renderDetachedChildren(children, childrenByParent, frame);
+  }
+
+  if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
+    const textColor = inlineTextNode?.textColor || element.textColor || '#111827';
+    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.34));
+    const fontWeight = inlineTextNode?.fontWeight || 600;
+    return renderInlineControl({ ...element, textColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
+  }
+
+  if (element.semanticType === 'input' && inlineText) {
+    const textColor = inlineTextNode?.textColor || '#6b7280';
+    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.3));
+    const fontWeight = inlineTextNode?.fontWeight || 400;
+    return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText);
+  }
+
+  const content = children.map((child) => renderNode(child, childrenByParent, element)).join('');
+  return renderShape(element, content, frame);
+}
+
+export class ComponentService {
+  static processElements(
+    elements = [],
+    image = { width: 1440, height: 900, background_color: '#ffffff' },
+    refinement = { page_kind: 'generic', hide_shape_ids: [], notes: [] },
+  ) {
+    const normalized = enrichDetectedElements(elements)
+      .map((element, index) => normalizeElement(element, index))
+      .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y) || (a.x - b.x));
+    applyParentAnchoring(normalized, image);
+
+    return {
+      image: {
+        width: Number(image.width) || 1440,
+        height: Number(image.height) || 900,
+        backgroundColor: image.background_color || '#ffffff',
+      },
+      refinement: {
+        pageKind: refinement?.page_kind || 'generic',
+        notes: Array.isArray(refinement?.notes) ? refinement.notes : [],
+      },
+      elements: normalized,
+    };
+  }
+
+  static generateHTML(processed) {
+    const image = processed.image;
+    const elements = processed.elements || [];
+    const bodyBg = image.backgroundColor || '#f6f8fa';
+    const hierarchy = buildHierarchy(elements);
+
+    const markup = hierarchy.roots
+      .map((element) => renderNode(element, hierarchy.childrenByParent))
+      .join('\n    ');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: ${bodyBg};
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      color: #24292f;
+    }
+    .viewport {
+      min-height: 100vh;
+      display: block;
+      padding: 16px;
+      overflow: auto;
+      background: ${bodyBg};
+    }
+    .canvas {
+      position: relative;
+      width: ${image.width}px;
+      height: ${image.height}px;
+      min-width: ${image.width}px;
+      min-height: ${image.height}px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: ${image.backgroundColor || '#ffffff'};
+    }
+    .screen-text {
+      overflow: visible;
+    }
+    .screen-shape {
+      overflow: hidden;
+    }
+    input::placeholder {
+      color: inherit;
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <main class="viewport">
+    <section class="canvas" aria-label="Generated reconstruction">
+    ${markup}
+    </section>
+  </main>
+</body>
+</html>`;
   }
 }
 
