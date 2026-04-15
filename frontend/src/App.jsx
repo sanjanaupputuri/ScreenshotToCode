@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { signInWithPopup, signOut } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
-import BubbleCanvas from "./components/BubbleCanvas";
 import HomeScreen from "./components/HomeScreen";
 import LoginScreen from "./components/LoginScreen";
 import ChatScreen from "./components/ChatScreen";
@@ -39,7 +38,7 @@ export default function App() {
       position: "relative", overflow: "hidden",
       fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
     }}>
-      <BubbleCanvas />
+
 
       {screen === "home" && (
         <HomeScreen onGetStarted={() => setScreen("login")} />

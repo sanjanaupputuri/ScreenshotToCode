@@ -73,6 +73,10 @@ function bestContrastText(background) {
   return contrastRatio(background, '#ffffff') >= contrastRatio(background, '#111827') ? '#ffffff' : '#111827';
 }
 
+function normalizeInlineText(value = '') {
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
 function normalizeElement(raw, index) {
   const kind = raw.kind || 'shape';
   const semanticType = raw.semantic_type || raw.type || kind;
@@ -133,11 +137,20 @@ function normalizeElement(raw, index) {
     fontWeight,
     textAlign: raw.text_align || 'left',
     zIndex: Number(raw.z_index) || 1,
+    confidence: Number(raw.confidence) || 0,
+    quality: Number(raw.quality) || 0,
     parentId: raw.parent_id ?? null,
     parentType: raw.parent_type ?? null,
     rowId: raw.row_id ?? null,
     layoutHint: raw.layout_hint || null,
   };
+}
+
+function updateElementPercents(element, imageWidth, imageHeight) {
+  element.x_pct = Number((element.x / imageWidth).toFixed(6));
+  element.y_pct = Number((element.y / imageHeight).toFixed(6));
+  element.w_pct = Number((element.width / imageWidth).toFixed(6));
+  element.h_pct = Number((element.height / imageHeight).toFixed(6));
 }
 
 function applyParentAnchoring(elements, image) {
@@ -155,34 +168,56 @@ function applyParentAnchoring(elements, image) {
     const padX = Math.max(6, Math.round(parent.height * 0.25));
 
     if (semantic === 'button' || semantic === 'chip') {
-      element.x = parent.x;
-      element.width = parent.width;
       element.textAlign = 'center';
-      element.y = Math.round(centerY);
       element.layoutHint = 'fill-center';
-      element.x_pct = Number((element.x / imageWidth).toFixed(6));
-      element.y_pct = Number((element.y / imageHeight).toFixed(6));
-      element.w_pct = Number((element.width / imageWidth).toFixed(6));
+      const targetY = Math.round(centerY);
+      if (Math.abs(element.y - targetY) > Math.max(4, Math.round(parent.height * 0.22))) {
+        element.y = targetY;
+      }
+      if (element.height > parent.height - 2) {
+        element.height = Math.max(1, parent.height - 2);
+      }
+      if (element.x < parent.x - 6 || element.x + element.width > parent.x + parent.width + 6) {
+        element.x = parent.x + 2;
+        element.width = Math.max(8, parent.width - 4);
+      }
+      updateElementPercents(element, imageWidth, imageHeight);
       continue;
     }
 
     if (semantic === 'input') {
-      element.x = parent.x + padX;
-      element.width = Math.max(20, parent.width - (padX * 2));
-      element.y = Math.round(centerY);
       element.textAlign = 'left';
       element.layoutHint = 'input-inline';
-      element.x_pct = Number((element.x / imageWidth).toFixed(6));
-      element.y_pct = Number((element.y / imageHeight).toFixed(6));
-      element.w_pct = Number((element.width / imageWidth).toFixed(6));
+      const targetY = Math.round(centerY);
+      if (Math.abs(element.y - targetY) > Math.max(4, Math.round(parent.height * 0.22))) {
+        element.y = targetY;
+      }
+
+      const minX = parent.x + Math.max(3, Math.floor(padX / 2));
+      const maxAllowedWidth = Math.max(20, parent.width - (padX * 2));
+      if (
+        element.x < parent.x + 1 ||
+        element.x + element.width > parent.x + parent.width - 1 ||
+        element.width > maxAllowedWidth * 1.2
+      ) {
+        element.x = parent.x + padX;
+        element.width = Math.min(Math.max(20, element.width), maxAllowedWidth);
+      } else {
+        element.x = Math.max(minX, element.x);
+        element.width = Math.max(8, Math.min(element.width, parent.x + parent.width - element.x - 2));
+      }
+
+      updateElementPercents(element, imageWidth, imageHeight);
       continue;
     }
 
     if (semantic === 'toolbar') {
-      element.y = Math.round(centerY);
+      const targetY = Math.round(centerY);
+      if (Math.abs(element.y - targetY) <= Math.max(10, Math.round(parent.height * 0.45))) {
+        element.y = targetY;
+      }
       element.layoutHint = 'center-y';
-      element.x_pct = Number((element.x / imageWidth).toFixed(6));
-      element.y_pct = Number((element.y / imageHeight).toFixed(6));
+      updateElementPercents(element, imageWidth, imageHeight);
     }
   }
 }
@@ -197,11 +232,16 @@ function getRelativeMetrics(element, frame) {
     };
   }
 
+  const left = Math.max(0, element.x - frame.x);
+  const top = Math.max(0, element.y - frame.y);
+  const maxWidth = Math.max(1, frame.width - left);
+  const maxHeight = Math.max(1, frame.height - top);
+
   return {
-    left: Math.max(0, element.x - frame.x),
-    top: Math.max(0, element.y - frame.y),
-    width: Math.max(1, element.width),
-    height: Math.max(1, element.height),
+    left,
+    top,
+    width: Math.max(1, Math.min(element.width, maxWidth)),
+    height: Math.max(1, Math.min(element.height, maxHeight)),
   };
 }
 
@@ -294,9 +334,112 @@ function textBoxForElement(element, metrics, frame = null) {
   };
 }
 
-function inlineTextFromChildren(children = []) {
-  const textChildren = children.filter((child) => child.kind === 'text' && child.text?.trim());
-  return textChildren.map((child) => child.text.trim()).join(' ').trim();
+function textChildScore(child) {
+  const text = normalizeInlineText(child.text);
+  if (!text) return -1;
+  const alphaCount = (text.match(/[a-z]/ig) || []).length;
+  const alphaRatio = alphaCount / Math.max(1, text.length);
+  const weirdSymbolRatio = (text.match(/[^a-z0-9\s#:/._-]/ig) || []).length / Math.max(1, text.length);
+  const quality = Number(child.quality) || 0;
+  const confidence = (Number(child.confidence) || 0) / 100;
+  return (
+    quality * 1.8 +
+    confidence * 1.1 +
+    alphaRatio * 0.9 +
+    Math.min(text.length, 30) * 0.02 -
+    weirdSymbolRatio * 1.1
+  );
+}
+
+function horizontalOverlapRatio(left, right) {
+  const overlap = Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x));
+  const smaller = Math.max(1, Math.min(left.width, right.width));
+  return overlap / smaller;
+}
+
+function mergeInlineSegments(rowItems = []) {
+  const sorted = [...rowItems]
+    .filter((item) => normalizeInlineText(item.text))
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+
+  const merged = [];
+  for (const item of sorted) {
+    if (!merged.length) {
+      merged.push(item);
+      continue;
+    }
+
+    const prev = merged[merged.length - 1];
+    const overlap = horizontalOverlapRatio(prev, item);
+    const xGap = item.x - (prev.x + prev.width);
+    const sameSlot = overlap >= 0.55 || xGap < -4;
+
+    if (sameSlot) {
+      if (textChildScore(item) > textChildScore(prev)) {
+        merged[merged.length - 1] = item;
+      }
+      continue;
+    }
+
+    if (xGap <= Math.max(28, Math.min(prev.height, item.height) * 2.5)) {
+      merged.push(item);
+      continue;
+    }
+
+    merged.push(item);
+  }
+
+  return merged;
+}
+
+function selectInlineText(children = [], semanticType = 'shape') {
+  const textChildren = children
+    .filter((child) => child.kind === 'text' && normalizeInlineText(child.text))
+    .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+  if (!textChildren.length) {
+    return { text: '', node: null };
+  }
+
+  const rows = [];
+  for (const child of textChildren) {
+    const centerY = child.y + (child.height / 2);
+    let placed = false;
+    for (const row of rows) {
+      if (Math.abs(centerY - row.centerY) <= Math.max(8, row.maxHeight * 0.78, child.height * 0.78)) {
+        row.items.push(child);
+        row.maxHeight = Math.max(row.maxHeight, child.height);
+        row.centerY = row.items.reduce((acc, item) => acc + item.y + (item.height / 2), 0) / row.items.length;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      rows.push({ centerY, maxHeight: child.height, items: [child] });
+    }
+  }
+
+  const candidates = rows.map((row) => {
+    const segments = mergeInlineSegments(row.items);
+    const text = normalizeInlineText(segments.map((item) => normalizeInlineText(item.text)).join(' '));
+    const sourceNode = [...segments].sort((a, b) => textChildScore(b) - textChildScore(a))[0] || null;
+    const words = text.split(/\s+/).filter(Boolean).length;
+    let score = segments.reduce((sum, segment) => sum + textChildScore(segment), 0) + (words <= 4 ? 0.5 : 0);
+
+    if (semanticType === 'input' && INPUT_LABEL_PATTERN.test(text)) score += 2.0;
+    if ((semanticType === 'button' || semanticType === 'chip') && CONTROL_LABEL_PATTERN.test(text)) score += 1.6;
+    if ((semanticType === 'button' || semanticType === 'chip') && words > 4) score -= 1.3;
+
+    return { text, node: sourceNode, score };
+  }).filter((candidate) => candidate.text);
+
+  if (!candidates.length) {
+    const fallbackNode = [...textChildren].sort((a, b) => textChildScore(b) - textChildScore(a))[0];
+    return { text: normalizeInlineText(fallbackNode?.text || ''), node: fallbackNode || null };
+  }
+
+  const best = candidates.sort((a, b) => b.score - a.score)[0];
+  return { text: best.text, node: best.node };
 }
 
 function renderDetachedChildren(children, childrenByParent, frame = null) {
@@ -472,8 +615,9 @@ function renderNode(element, childrenByParent, frame = null) {
   if (element.kind === 'text') return renderText(element, frame);
 
   const children = childrenByParent.get(element.sourceId) || [];
-  const inlineText = inlineTextFromChildren(children);
-  const inlineTextNode = children.find((child) => child.kind === 'text');
+  const inlineSelection = selectInlineText(children, element.semanticType);
+  const inlineText = inlineSelection.text;
+  const inlineTextNode = inlineSelection.node;
 
   if (children.length === 0) {
     if (
