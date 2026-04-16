@@ -22,7 +22,12 @@ export async function generateCode(imagePath, metadata = {}) {
     storedName: metadata.storedName,
   });
 
-  const detection = await DetectionService.detectElements(imagePath);
+  const USE_REGIONS = process.env.USE_REGION_DETECTION === 'true';
+  const detection = await DetectionService.detectElements(imagePath, USE_REGIONS);
+  
+  if (USE_REGIONS) {
+    console.log('  Using region-based detection (2x2 grid with overlap)');
+  }
 
   // Stage 1b: Ollama layout refinement (identify page type, suppress noise)
   const refinement = await LayoutRefiner.refine(detection);

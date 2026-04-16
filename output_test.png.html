@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background-color: #f6f8fa; /* Improved background color accuracy */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; /* Font family updated to match the page type (likely a wiki or documentation site) */
+  color: #24292f;
+}
+.viewport {
+  min-height: 100vh;
+  display: block;
+  padding: 16px;
+  overflow: auto;
+  background-color: #f6f8fa; /* Improved background color accuracy */
+}
+.canvas {
+  position: relative;
+  width: 1920px;
+  height: 919px;
+  min-width: 1920px;
+  min-height: 919px;
+  margin: 0 auto;
+  overflow: hidden;
+  background-color: #f6f8fa; /* Improved background color accuracy */
+}
+.screen-text {
+  overflow: visible;
+}
+.screen-shape {
+  overflow: hidden;
+}
+input::placeholder {
+  color: inherit;
+  opacity: 1;
+}</style>
+</head>
+<body>
+  <main class="viewport">
+    <section class="canvas" aria-label="Generated reconstruction">
+    <div class="screen-bg" style="position:absolute;inset:0;background:#e6e9eb;z-index:1"></div>
+    <div class="screen-shape screen-toolbar"  style="position:absolute;left:0px;top:3px;width:1920px;height:65px;background:#f6f8fa;border:none;border-bottom:1px solid #d0d7de;border-radius:0px;overflow:visible;z-index:2" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-toolbar"  style="position:absolute;left:0px;top:83px;width:1920px;height:33px;background:#f6f8fa;border:none;border-bottom:1px solid #d0d7de;border-radius:0px;overflow:visible;z-index:2" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-shape"  style="position:absolute;left:226px;top:671px;width:554px;height:30px;background:#fefefe;border:none;border-bottom:1px solid #d0d7de;border-radius:0px;overflow:visible;z-index:2" data-parent-id="" data-row-id="11"></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:1233px;top:7px;width:687px;height:912px;background:#ffffff;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-toolbar"  style="position:absolute;left:0px;top:151px;width:1920px;height:33px;background:#ffffff;border:none;border-bottom:1px solid #d0d7de;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:227px;width:1920px;height:60px;background:#ffffff;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:281px;width:1920px;height:82px;background:#f6f8fa;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <button type="button" style="position:absolute;left:1172px;top:233px;width:140px;height:47px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#ffffff;font-size:16px;font-weight:600;line-height:1.18;text-align:center;background:#1f883d;border:4px solid #fdfdfd;border-radius:6px;z-index:8;overflow:hidden">⬇ Code</button>
+    <button type="button" style="position:absolute;left:188px;top:234px;width:136px;height:46px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#909aa2;font-size:18px;font-weight:700;line-height:1.18;text-align:center;background:#f6f8fa;border:4px solid #ffffff;border-radius:5px;z-index:8;overflow:hidden">main</button>
+    <div class="screen-shape screen-input"  style="position:absolute;left:653px;top:375px;width:161px;height:28px;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;overflow:visible;z-index:9" data-parent-id="" data-row-id="5"></div>
+    <input type="text" value="" placeholder="to search" readonly style="position:absolute;left:1271px;top:22px;width:220px;height:33px;padding:0 10px;color:#c0ccda;font-size:18px;font-weight:700;line-height:1.2;background:#f6f8fa;border:1px solid #d0d7de;border-radius:7px;outline:none;z-index:11" />
+    <div  style="position:absolute;left:1004px;top:320px;width:164px;height:22px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:11px;font-weight:600;line-height:1.18;text-align:center;background:#f5f7f9;border:none;border-radius:9px;z-index:11;overflow:hidden">minute</div>
+    <div class="screen-shape screen-input"  style="position:absolute;left:203px;top:314px;width:313px;height:34px;background:#f2f5f7;border:1px solid #d0d7de;border-radius:12px;overflow:visible;z-index:12" data-parent-id="" data-row-id="4"></div>
+    <div class="screen-text" style="position:absolute;left:33px;top:4px;width:41px;min-height:15px;color:#6d839c;font-size:12px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="18" data-row-id="1">Code</div>
+    <div  style="position:absolute;left:866px;top:240px;width:143px;height:33px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:11px;font-weight:600;line-height:1.18;text-align:center;background:#ffffff;border:none;border-radius:5px;z-index:13;overflow:hidden"></div>
+    <div class="screen-text" style="position:absolute;left:20px;top:6px;width:35px;min-height:12px;color:#a5b0db;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="21" data-row-id="7">stars</div>
+    <div class="screen-text" style="position:absolute;left:20px;top:4px;width:68px;min-height:18px;color:#b5c6df;font-size:14px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="22" data-row-id="8">watching</div>
+    <div class="screen-text" style="position:absolute;left:20px;top:5px;width:37px;min-height:14px;color:#99b0dc;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="23" data-row-id="9">forks</div>
+    <button type="button" style="position:absolute;left:1334px;top:294px;width:333px;height:56px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:17px;font-weight:600;line-height:1.18;text-align:center;background:#ffffff;border:none;border-radius:10px;z-index:14;overflow:hidden">finding the shortest path of Firetruck</button>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:1834px;top:13px;width:48px;height:49px;background:#e3e3eb;border:4px solid #f6f8fa;border-radius:49px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:1784px;top:15px;width:45px;height:46px;background:#f6f8fa;border:none;border-radius:46px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:73px;top:16px;width:43px;height:43px;background:#bec0c3;border:4px solid #f6f8fa;border-radius:43px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:22px;top:21px;width:35px;height:34px;background:#f6f8fa;border:none;border-radius:35px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:1327px;top:151px;width:29px;height:29px;background:#f6f8fa;border:none;border-radius:29px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="2"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:1049px;top:240px;width:31px;height:34px;background:#f6f8fa;border:none;border-radius:34px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="3"></div>
+    <div class="screen-text" style="position:absolute;left:368px;top:240px;width:157px;min-height:34px;color:#909aa2;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:17" data-parent-id="" data-row-id="3">1Branch OTags</div>
+    <div class="screen-text" style="position:absolute;left:243px;top:315px;width:268px;min-height:29px;color:#111827;font-size:14px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:17" data-parent-id="" data-row-id="4">24WH1A05Z3 Add files via upload</div>
+    <div class="screen-text" style="position:absolute;left:133px;top:17px;width:229px;min-height:37px;color:#111827;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="" data-row-id="0">24WH1A0SZ3 FIRETRUCK</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:299px;width:322px;min-height:21px;color:#8daabf;font-size:14px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="" data-row-id="4">finding the shortest path of Firetruck</div>
+    <div class="screen-text" style="position:absolute;left:245px;top:377px;width:106px;min-height:22px;color:#ab9fca;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="" data-row-id="5">FIRETRUCK</div>
+    <div class="screen-text" style="position:absolute;left:1375px;top:377px;width:61px;min-height:22px;color:#ab9fca;font-size:16px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="" data-row-id="5">Readme</div>
+    <div class="screen-text" style="position:absolute;left:234px;top:598px;width:199px;min-height:29px;color:#1f242f;font-size:24px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="25" data-row-id="10">FIRETRUCK</div>
+    <div class="screen-text" style="position:absolute;left:231px;top:676px;width:402px;min-height:20px;color:#8d9ec0;font-size:15px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:18" data-parent-id="" data-row-id="11">finding the shortest path of Firetruck when an</div>
+    <div class="screen-text" style="position:absolute;left:802px;top:240px;width:70px;min-height:34px;color:#909aa2;font-size:14px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="3">Goto file</div>
+    <div class="screen-text" style="position:absolute;left:1056px;top:240px;width:69px;min-height:34px;color:#909aa2;font-size:14px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="3">Add file</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:240px;width:56px;min-height:34px;color:#909aa2;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="3">About</div>
+    <div class="screen-text" style="position:absolute;left:1083px;top:315px;width:51px;min-height:29px;color:#111827;font-size:13px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="4">minute</div>
+    <div class="screen-text" style="position:absolute;left:658px;top:377px;width:151px;min-height:22px;color:#ab9fca;font-size:13px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="5">Add files via upload</div>
+    <div class="screen-text" style="position:absolute;left:1201px;top:377px;width:87px;min-height:22px;color:#ab9fca;font-size:14px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="" data-row-id="5">minute ago</div>
+    <div class="screen-text" style="position:absolute;left:1617px;top:24px;width:8px;min-height:29px;color:#a8afb5;font-size:9px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="16" data-row-id="0">at</div>
+    <div class="screen-text" style="position:absolute;left:1697px;top:24px;width:69px;min-height:20px;color:#a2a8ae;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="16" data-row-id="0">On</div>
+    <div class="screen-text" style="position:absolute;left:303px;top:90px;width:65px;min-height:19px;color:#6183a8;font-size:13px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="" data-row-id="1">requests</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:329px;width:215px;min-height:16px;color:#86a7bb;font-size:16px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="" data-row-id="4">when an accident occurs</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:797px;width:168px;min-height:16px;color:#111827;font-size:11px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="28" data-row-id="13">Publish your first package</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:863px;width:193px;min-height:20px;color:#657992;font-size:16px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="29" data-row-id="14">Suggested workflows</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:891px;width:191px;min-height:18px;color:#111827;font-size:13px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="" data-row-id="14">Based on your tech stack</div>
+    <div class="screen-text" style="position:absolute;left:163px;top:90px;width:44px;min-height:19px;color:#6183a8;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="1">Issues</div>
+    <div class="screen-text" style="position:absolute;left:431px;top:90px;width:56px;min-height:19px;color:#6183a8;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="1">Actions</div>
+    <div class="screen-text" style="position:absolute;left:551px;top:90px;width:59px;min-height:19px;color:#6183a8;font-size:12px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="1">Projects</div>
+    <div class="screen-text" style="position:absolute;left:672px;top:90px;width:32px;min-height:19px;color:#6183a8;font-size:12px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="1">wiki</div>
+    <div class="screen-text" style="position:absolute;left:768px;top:90px;width:182px;min-height:19px;color:#96aaca;font-size:16px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="1">Security Insights</div>
+    <div class="screen-text" style="position:absolute;left:1013px;top:91px;width:61px;min-height:18px;color:#91a1b8;font-size:13px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="17" data-row-id="1">Settings</div>
+    <div class="screen-text" style="position:absolute;left:1249px;top:159px;width:43px;min-height:12px;color:#758e9f;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="2">Watch</div>
+    <div class="screen-text" style="position:absolute;left:1416px;top:159px;width:204px;min-height:12px;color:#72829a;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:21" data-parent-id="" data-row-id="2">Fork star</div>
+    <div class="screen-text" style="position:absolute;left:1193px;top:432px;width:95px;min-height:17px;color:#a3bcd1;font-size:11px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:22" data-parent-id="36" data-row-id="6">minute ago</div>
+    <div class="screen-text" style="position:absolute;left:232px;top:159px;width:183px;min-height:19px;color:#57606a;font-size:13px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="" data-row-id="2">FIRETRUCK Public</div>
+    <div class="screen-text" style="position:absolute;left:1222px;top:319px;width:60px;min-height:21px;color:#57606a;font-size:14px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="32" data-row-id="4">Commits</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:414px;width:91px;min-height:17px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="" data-row-id="6">Activity</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:591px;width:75px;min-height:16px;color:#57606a;font-size:12px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="24" data-row-id="10">Releases</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:639px;width:143px;min-height:14px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="26" data-row-id="11">No releases published</div>
+    <div class="screen-text" style="position:absolute;left:1339px;top:661px;width:136px;min-height:11px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="26" data-row-id="11">Create a new release</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:727px;width:82px;min-height:20px;color:#57606a;font-size:15px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="27" data-row-id="12">Packages</div>
+    <div class="screen-text" style="position:absolute;left:1340px;top:775px;width:152px;min-height:14px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:23" data-parent-id="28" data-row-id="13">No packages published</div>
+    <div class="screen-text" style="position:absolute;left:245px;top:431px;width:94px;min-height:15px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:24" data-parent-id="34" data-row-id="6">README.md</div>
+    <div class="screen-text" style="position:absolute;left:659px;top:431px;width:104px;min-height:14px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:24" data-parent-id="35" data-row-id="6">Initial commit</div>
+    <div class="screen-text" style="position:absolute;left:242px;top:509px;width:69px;min-height:14px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:24" data-parent-id="37" data-row-id="9">README</div>
+    <div class="screen-text" style="position:absolute;left:640px;top:676px;width:135px;min-height:15px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:24" data-parent-id="" data-row-id="11">accident occurs</div>
+    </section>
+  </main>
+</body>
+</html>

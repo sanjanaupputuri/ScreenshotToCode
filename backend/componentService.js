@@ -139,7 +139,7 @@ function normalizeElement(raw, index) {
     fontSize,
     fontWeight,
     textAlign: raw.text_align || 'left',
-    zIndex: Number(raw.z_index) || 1,
+    zIndex: kind === 'text' ? 100 : (Number(raw.z_index) || 1),  // FORCE text to z=100
     confidence: Number(raw.confidence) || 0,
     quality: Number(raw.quality) || 0,
     parentId: raw.parent_id ?? null,
