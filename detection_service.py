@@ -556,7 +556,33 @@ def build_shape_mask(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 35, 120)
     inv_white = cv2.threshold(gray, 245, 255, cv2.THRESH_BINARY_INV)[1]
+    
+    # Detect colored regions by looking for non-neutral colors
+    # This helps find buttons with colored backgrounds
+    b, g, r = cv2.split(image)
+    
+    # Find blue regions (B > R+G)
+    blue_mask = cv2.threshold(b.astype(np.int16) - r.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    
+    # Find red regions (R > B+G)
+    red_mask = cv2.threshold(r.astype(np.int16) - b.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    
+    # Find green regions (G > R+B)
+    green_mask = cv2.threshold(g.astype(np.int16) - r.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    
+    # Combine color masks
+    color_mask = cv2.bitwise_or(blue_mask, red_mask)
+    color_mask = cv2.bitwise_or(color_mask, green_mask)
+    
+    # Clean up color mask to get solid regions
+    color_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, color_kernel, iterations=2)
+    color_mask = cv2.dilate(color_mask, color_kernel, iterations=1)
+    
+    # Combine with edge detection
     mask = cv2.bitwise_or(edges, inv_white)
+    mask = cv2.bitwise_or(mask, color_mask)
+    
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     return cv2.dilate(mask, kernel, iterations=1)
@@ -621,10 +647,24 @@ def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width)
         return "avatar" if w >= 24 and h >= 24 else "icon"
     if w >= 160 and 4.0 <= aspect <= 20.0 and 24 <= h <= 72 and (brightness > 238 or (border_width > 0 and brightness > 220)):
         return "input"
+    
+    # Button detection - prioritize over chips
+    # Buttons: wider, colored backgrounds OR borders, reasonable height
+    if text_count > 0 and 2.0 <= aspect <= 10.0 and 28 <= h <= 80 and w >= 120:
+        # Strong button indicators: colored background (not neutral) OR border
+        if brightness < 220 or border_width > 0:
+            return "button"
+    
+    # Chip detection - smaller, badge-like elements
     if text_count > 0 and w <= 260 and area_ratio < 0.012 and 2.0 <= aspect <= 10.0 and 18 <= h <= 46:
-        return "chip"
-    if 2.0 <= aspect <= 10.0 and 24 <= h <= 70 and (brightness < 230 or border_width > 0):
+        # Only classify as chip if it's small and neutral colored
+        if w < 120 or (brightness > 220 and border_width == 0):
+            return "chip"
+    
+    # Fallback button detection for any remaining button-like shapes
+    if 2.0 <= aspect <= 10.0 and 24 <= h <= 80 and (brightness < 230 or border_width > 0):
         return "button"
+    
     if area_ratio > 0.015 and h > 28 and w > 90:
         return "panel"
     return "shape"
@@ -773,12 +813,90 @@ def create_structural_bands(image, text_regions, shape_regions, page_background)
 
 def detect_shape_regions(image, text_regions, page_background):
     height, width = image.shape[:2]
+    
+    # Standard edge-based detection
     mask = build_shape_mask(image)
     contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Additional color-based button detection
+    b, g, r = cv2.split(image)
+    blue_mask = cv2.threshold(b.astype(np.int16) - r.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    red_mask = cv2.threshold(r.astype(np.int16) - b.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    green_mask = cv2.threshold(g.astype(np.int16) - r.astype(np.int16) - 20, 20, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
+    
+    color_mask = cv2.bitwise_or(blue_mask, red_mask)
+    color_mask = cv2.bitwise_or(color_mask, green_mask)
+    
+    color_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, color_kernel, iterations=2)
+    color_mask = cv2.dilate(color_mask, color_kernel, iterations=1)
+    
+    color_contours, _ = cv2.findContours(color_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     elements = []
     min_area = max(180, int(width * height * 0.00045))
 
+    # Process color-detected contours first (buttons with colored backgrounds)
+    for contour in color_contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = w * h
+        
+        # Button-sized colored regions
+        if area < min_area or w < 100 or h < 30:
+            continue
+        if w > width * 0.99 and h > height * 0.99:
+            continue
+        
+        roi = crop(image, x, y, w, h)
+        if roi.size == 0:
+            continue
+
+        local_mask = np.zeros((h, w), dtype=np.uint8)
+        shifted = contour - [x, y]
+        cv2.drawContours(local_mask, [shifted], -1, 255, thickness=-1)
+
+        fill_hex, border_hex, border_width, border_radius = estimate_border_and_fill(roi, local_mask)
+        fill_bgr = np.array([int(fill_hex[5:7], 16), int(fill_hex[3:5], 16), int(fill_hex[1:3], 16)])
+        bg_distance = np.linalg.norm(fill_bgr - page_background)
+
+        linked_texts = []
+        for region in text_regions:
+            within = (
+                region["x"] >= x - 4 and
+                region["y"] >= y - 4 and
+                region["x"] + region["width"] <= x + w + 4 and
+                region["y"] + region["height"] <= y + h + 4
+            )
+            if within:
+                linked_texts.append(region)
+
+        # Colored regions are likely buttons
+        element_type = "button"
+        z_index = 10
+
+        elements.append({
+            "kind": "shape",
+            "type": element_type,
+            "text": "",
+            "x": int(x),
+            "y": int(y),
+            "width": int(w),
+            "height": int(h),
+            "area": int(area),
+            "background_color": fill_hex,
+            "border_color": border_hex,
+            "border_width": int(border_width),
+            "border_radius": int(border_radius),
+            "text_color": "transparent",
+            "font_size": 0,
+            "font_weight": 0,
+            "text_align": "left",
+            "z_index": z_index,
+            "linked_text_count": len(linked_texts),
+            "nesting_level": 0,
+        })
+
+    # Process standard edge-detected contours
     if hierarchy is None:
         return elements
 
@@ -1601,7 +1719,6 @@ def detect_ui_elements(image_path):
     synthetic_inputs = create_synthetic_input_containers(image, text_regions, shape_regions)
     shape_regions.extend(synthetic_inputs)
     shape_regions.extend(create_synthetic_text_containers(shape_regions + text_regions))
-    # Inject structural bands (navbar, tab bar, content panels, sidebar) missed by contour detection
 
     background = {
         "kind": "background",
@@ -1632,7 +1749,6 @@ def detect_ui_elements(image_path):
     elements = stabilize_element_coordinates(elements, width, height)
     elements = [normalize_component(element, width, height) for element in elements]
     
-    # FIX: Force all text to z-index 100
     elements = fix_overlapping_text_zindex(elements)
 
     return {
@@ -1643,6 +1759,14 @@ def detect_ui_elements(image_path):
         },
         "components": elements[:220],
     }
+
+
+def fix_overlapping_text_zindex(elements):
+    """FORCE all text to z-index 100 to ensure it's always above shapes"""
+    for el in elements:
+        if el.get("kind") == "text":
+            el["z_index"] = 100
+    return elements
 
 
 @app.route("/health", methods=["GET"])
@@ -1661,7 +1785,13 @@ def detect():
         return jsonify({"error": f"File not found: {image_path}"}), 404
 
     try:
-        detection = detect_ui_elements(image_path)
+        use_regions = data.get("use_regions", False)
+        
+        if use_regions:
+            detection = detect_with_regions(image_path)
+        else:
+            detection = detect_ui_elements(image_path)
+            
         if detection is None:
             return jsonify({"error": "Could not read image"}), 400
         return jsonify(detection)
@@ -1669,6 +1799,132 @@ def detect():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(error)}), 500
+
+
+def detect_with_regions(image_path):
+    """Detect UI elements using 2x2 grid with overlap for better accuracy"""
+    image = cv2.imread(image_path)
+    if image is None:
+        return None
+    
+    h, w = image.shape[:2]
+    overlap = 0.15  # 15% overlap
+    
+    # Calculate region dimensions
+    rw = int(w / 2 * (1 + overlap))
+    rh = int(h / 2 * (1 + overlap))
+    
+    regions = [
+        (0, 0, min(rw, w), min(rh, h)),
+        (int(w/2 * (1-overlap)), 0, min(rw, w - int(w/2 * (1-overlap))), min(rh, h)),
+        (0, int(h/2 * (1-overlap)), min(rw, w), min(rh, h - int(h/2 * (1-overlap)))),
+        (int(w/2 * (1-overlap)), int(h/2 * (1-overlap)), min(rw, w - int(w/2 * (1-overlap))), min(rh, h - int(h/2 * (1-overlap))))
+    ]
+    
+    all_elements = []
+    
+    for rx, ry, rw, rh in regions:
+        roi = image[ry:ry+rh, rx:rx+rw]
+        result = detect_ui_elements_from_image(roi)
+        
+        if result and result.get("components"):
+            for el in result["components"]:
+                # Skip background elements from regions
+                if el.get("kind") == "background":
+                    continue
+                
+                # Adjust coordinates to global space
+                el["x"] = int(el["x"] + rx)
+                el["y"] = int(el["y"] + ry)
+                
+                # Clamp to image boundaries
+                el["x"] = max(0, min(el["x"], w - el["width"]))
+                el["y"] = max(0, min(el["y"], h - el["height"]))
+                
+                # Recalculate percentages for full image
+                el["x_pct"] = round(el["x"] / w, 6)
+                el["y_pct"] = round(el["y"] / h, 6)
+                el["w_pct"] = round(el["width"] / w, 6)
+                el["h_pct"] = round(el["height"] / h, 6)
+                
+                all_elements.append(el)
+    
+    # Deduplicate using IoU (Intersection over Union)
+    def iou(e1, e2):
+        x1 = max(e1["x"], e2["x"])
+        y1 = max(e1["y"], e2["y"])
+        x2 = min(e1["x"] + e1["width"], e2["x"] + e2["width"])
+        y2 = min(e1["y"] + e1["height"], e2["y"] + e2["height"])
+        
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+        
+        intersection = (x2 - x1) * (y2 - y1)
+        area1 = e1["width"] * e1["height"]
+        area2 = e2["width"] * e2["height"]
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0.0
+    
+    # Remove duplicates with >70% overlap
+    deduplicated = []
+    for el in all_elements:
+        is_duplicate = False
+        for existing in deduplicated:
+            if el["kind"] == existing["kind"] and iou(el, existing) > 0.7:
+                # Keep the one with more text or larger size
+                if len(el.get("text", "")) > len(existing.get("text", "")):
+                    deduplicated.remove(existing)
+                    break
+                else:
+                    is_duplicate = True
+                    break
+        
+        if not is_duplicate:
+            deduplicated.append(el)
+    
+    # Sort by z-index to maintain proper layering
+    deduplicated.sort(key=lambda e: e.get("z_index", 1))
+    
+    return {
+        "image": {"width": w, "height": h, "background_color": hex_from_bgr(estimate_page_background(image))},
+        "components": deduplicated[:220]
+    }
+
+
+def detect_ui_elements_from_image(image):
+    """Detect from image array (for region processing)"""
+    if image is None or image.size == 0:
+        return None
+
+    height, width = image.shape[:2]
+    page_background = estimate_page_background(image)
+    text_regions_base = detect_text_regions(image)
+    shape_regions = detect_shape_regions(image, text_regions_base, page_background)
+    text_regions = explode_long_text_lines(text_regions_base, shape_regions)
+    text_regions = merge_adjacent_text_regions(text_regions)
+    synthetic_inputs = create_synthetic_input_containers(image, text_regions, shape_regions)
+    shape_regions.extend(synthetic_inputs)
+    shape_regions.extend(create_synthetic_text_containers(shape_regions + text_regions))
+
+    background = {
+        "kind": "background", "type": "background", "text": "", "x": 0, "y": 0,
+        "width": width, "height": height, "area": int(width * height),
+        "background_color": hex_from_bgr(page_background), "border_color": "transparent",
+        "border_width": 0, "border_radius": 0, "text_color": "transparent",
+        "font_size": 0, "font_weight": 0, "text_align": "left", "z_index": 0,
+    }
+
+    elements = [background] + shape_regions + text_regions
+    elements = assign_relationships(filter_regions(elements))
+    structural_bands = create_structural_bands(image, text_regions, shape_regions, page_background)
+    if structural_bands:
+        elements = structural_bands + elements
+    elements = prune_detected_elements(elements)
+    elements = stabilize_element_coordinates(elements, width, height)
+    elements = [normalize_component(element, width, height) for element in elements]
+
+    return {"image": {"width": width, "height": height, "background_color": background["background_color"]}, "components": elements}
 
 
 if __name__ == "__main__":
