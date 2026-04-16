@@ -1625,13 +1625,15 @@ def detect_ui_elements(image_path):
 
     elements = [background] + shape_regions + text_regions
     elements = assign_relationships(filter_regions(elements))
-    # Add structural bands AFTER filter_regions so they aren't removed by overlap logic
     structural_bands = create_structural_bands(image, text_regions, shape_regions, page_background)
     if structural_bands:
-        elements = structural_bands + elements  # bands go behind everything
+        elements = structural_bands + elements
     elements = prune_detected_elements(elements)
     elements = stabilize_element_coordinates(elements, width, height)
     elements = [normalize_component(element, width, height) for element in elements]
+    
+    # FIX: Force all text to z-index 100
+    elements = fix_overlapping_text_zindex(elements)
 
     return {
         "image": {
