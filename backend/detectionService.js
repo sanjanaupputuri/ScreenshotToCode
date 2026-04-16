@@ -52,7 +52,7 @@ function runPythonDetection(imagePath) {
 
 export class DetectionService {
 
-  static async detectElements(imagePath) {
+  static async detectElements(imagePath, useRegions = false) {
     // Use absolute path - resolve relative to project root
     const absPath = path.isAbsolute(imagePath)
       ? imagePath
@@ -62,7 +62,7 @@ export class DetectionService {
       const response = await fetch(`${PYTHON_SERVICE}/detect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_path: absPath }),
+        body: JSON.stringify({ image_path: absPath, use_regions: useRegions }),
         signal: AbortSignal.timeout(15000)
       });
 

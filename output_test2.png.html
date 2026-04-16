@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background-color: #1a1a2e; /* Improved background color accuracy */
+  font-family: Arial, sans-serif; /* Font-family to match the page type */
+  color: #24292f; /* Improved color for better contrast */
+}
+.viewport {
+  min-height: 100vh;
+  display: block;
+  padding: 16px;
+  overflow: auto;
+  background-color: #1a1a2e;
+}
+.canvas {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  min-width: 1920px;
+  min-height: 1080px;
+  margin: 0 auto;
+  overflow: hidden;
+  background-color: #1a1a2e;
+}
+.screen-text {
+  overflow: visible;
+}
+.screen-shape {
+  overflow: hidden;
+}
+input::placeholder {
+  color: inherit;
+  opacity: 1;
+}
+</style>
+</head>
+<body>
+  <main class="viewport">
+    <section class="canvas" aria-label="Generated reconstruction">
+    <div class="screen-bg" style="position:absolute;inset:0;background:#1a1a2e;z-index:1"></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:278px;width:1920px;height:81px;background:#2d333b;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:385px;width:1920px;height:50px;background:#2d333b;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <button type="button" style="position:absolute;left:403px;top:293px;width:427px;height:52px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:32px;font-weight:700;line-height:1.18;text-align:center;background:#fb4243;border:4px solid #1a1a2e;border-radius:8px;z-index:6;overflow:hidden">EMERGENCY</button>
+    <button type="button" style="position:absolute;left:1231px;top:293px;width:398px;height:52px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:32px;font-weight:700;line-height:1.18;text-align:center;background:#fc4243;border:4px solid #1a1a2e;border-radius:15px;z-index:6;overflow:hidden">SIMULATOR</button>
+    <button type="button" style="position:absolute;left:825px;top:620px;width:273px;height:30px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#c8af96;font-size:17px;font-weight:700;line-height:1.18;text-align:center;background:#3c3c4c;border:3px solid #1a1a2e;border-radius:9px;z-index:6;overflow:hidden">Performance Analytics</button>
+    <button type="button" style="position:absolute;left:1078px;top:694px;width:170px;height:77px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#ffffff;font-size:26px;font-weight:600;line-height:1.18;text-align:center;background:#d32f2f;border:4px solid #1a1a2e;border-radius:0px;z-index:6;overflow:hidden"></button>
+    <button type="button" style="position:absolute;left:848px;top:293px;width:364px;height:52px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:32px;font-weight:700;line-height:1.18;text-align:center;background:#fe4343;border:4px solid #1a1a2e;border-radius:5px;z-index:8;overflow:hidden">RESPONSE</button>
+    <button type="button" style="position:absolute;left:672px;top:690px;width:386px;height:86px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#ffffff;font-size:29px;font-weight:600;line-height:1.18;text-align:center;background:#1976d2;border:none;border-radius:0px;z-index:10;overflow:hidden"></button>
+    <div class="screen-text" style="position:absolute;left:16px;top:8px;width:184px;min-height:23px;color:#b8a288;font-size:16px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="1" data-row-id="2">Multi-City Support</div>
+    <div class="screen-text" style="position:absolute;left:14px;top:6px;width:214px;min-height:18px;color:#bdbaa8;font-size:15px;font-weight:600;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:5" data-parent-id="3" data-row-id="4">Real-time Simulation</div>
+    <div class="screen-text" style="position:absolute;left:688px;top:396px;width:306px;min-height:28px;color:#5693ba;font-size:23px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:17" data-parent-id="7" data-row-id="1">Hyderabad Emergency</div>
+    <div class="screen-text" style="position:absolute;left:1005px;top:396px;width:110px;min-height:28px;color:#5693ba;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:17" data-parent-id="7" data-row-id="1">Services</div>
+    <div class="screen-text" style="position:absolute;left:1125px;top:396px;width:107px;min-height:28px;color:#5693ba;font-size:21px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:17" data-parent-id="8" data-row-id="1">Training</div>
+    <div class="screen-text" style="position:absolute;left:861px;top:528px;width:229px;min-height:24px;color:#cfac89;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:19" data-parent-id="2" data-row-id="3">Advanced Pathfinding</div>
+    <div class="screen-text" style="position:absolute;left:830px;top:1047px;width:260px;min-height:17px;color:#4a8c1f;font-size:13px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:20" data-parent-id="" data-row-id="7">Press ESC to exit Ready to launch</div>
+    </section>
+  </main>
+</body>
+</html>
