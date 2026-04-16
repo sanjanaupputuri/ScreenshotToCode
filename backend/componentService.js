@@ -97,18 +97,21 @@ function normalizeElement(raw, index) {
     textRole === 'muted' ? '#57606a' :
     (isTransparent(raw.text_color) ? '#24292f' : raw.text_color);
   const parentBackground = raw.parent_background_color || null;
+
+  // Check contrast against parent bg OR the element's own background (for inline text)
+  const contrastBg = parentBackground || (kind === 'text' ? null : background);
   const needsContrastCorrection =
     raw.kind === 'text' &&
-    parentBackground &&
-    !isTransparent(parentBackground) &&
+    contrastBg &&
+    !isTransparent(contrastBg) &&
     (
       isTransparent(raw.text_color) ||
-      contrastRatio(textColor, parentBackground) < 1.28 ||
-      colorDistance(textColor, parentBackground) < 26
+      contrastRatio(textColor, contrastBg) < 1.5 ||
+      colorDistance(textColor, contrastBg) < 30
     );
   const correctedTextColor =
     needsContrastCorrection
-      ? bestContrastText(parentBackground)
+      ? bestContrastText(contrastBg)
       : textColor;
 
   const sourceId = Number.isFinite(raw.id) ? Number(raw.id) : index;
@@ -442,16 +445,16 @@ function selectInlineText(children = [], semanticType = 'shape') {
   return { text: best.text, node: best.node };
 }
 
-function renderDetachedChildren(children, childrenByParent, frame = null) {
+function renderDetachedChildren(children, childrenByParent, frame = null, pageBg = null) {
   return children.map((child) => {
     if (child.kind === 'text') {
       return renderText({
         ...child,
         layoutHint: null,
         textAlign: child.textAlign === 'center' ? 'left' : child.textAlign,
-      }, frame);
+      }, frame, pageBg);
     }
-    return renderNode(child, childrenByParent, frame);
+    return renderNode(child, childrenByParent, frame, pageBg);
   }).join('');
 }
 
@@ -511,7 +514,10 @@ function renderShape(element, content, frame = null, tagName = 'div') {
       : element.semanticType === 'icon'
         ? Math.max(element.borderRadius, 6)
         : element.borderRadius;
-  const overflow = element.semanticType === 'panel' || element.semanticType === 'toolbar' ? 'visible' : 'hidden';
+  const overflow = (element.semanticType === 'avatar' || element.semanticType === 'icon') ? 'hidden' : 'visible';
+  const hasChildren = Boolean(content);
+  // Toolbars get a subtle bottom border for visual separation
+  const borderBottom = element.semanticType === 'toolbar' ? '1px solid #d0d7de' : undefined;
   return `<${tagName} class="screen-shape screen-${element.type}" ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
     position: 'absolute',
     left: px(metrics.left),
@@ -520,23 +526,34 @@ function renderShape(element, content, frame = null, tagName = 'div') {
     height: px(metrics.height),
     background: element.background,
     border: element.border,
+    'border-bottom': borderBottom,
     'border-radius': px(radius),
     overflow,
     'z-index': element.zIndex,
+    isolation: hasChildren ? 'isolate' : undefined,
   })}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${content || ''}</${tagName}>`;
 }
 
-function renderText(element, frame = null) {
+function renderText(element, frame = null, pageBg = null) {
   const metrics = getRelativeMetrics(element, frame);
   const box = textBoxForElement(element, metrics, frame);
   const fittedFontSize = fitTextSize(element.text, element.fontSize, box.width, box.height, element.fontWeight, 9);
+  const localZIndex = frame ? Math.min(element.zIndex, 5) : element.zIndex;
+
+  // For orphan texts (no parent frame), check contrast against page background
+  let textColor = element.textColor;
+  if (!frame && pageBg && !isTransparent(pageBg)) {
+    if (contrastRatio(textColor, pageBg) < 1.5 || colorDistance(textColor, pageBg) < 30) {
+      textColor = bestContrastText(pageBg);
+    }
+  }
   const baseStyle = {
     position: 'absolute',
     left: px(metrics.left),
     top: px(metrics.top),
     width: px(metrics.width),
     'min-height': px(metrics.height),
-    color: element.textColor,
+    color: textColor,
     'font-size': px(fittedFontSize),
     'font-weight': element.fontWeight,
     'line-height': '1.18',
@@ -546,7 +563,7 @@ function renderText(element, frame = null) {
     overflow: 'hidden',
     background: 'transparent',
     border: 'none',
-    'z-index': element.zIndex,
+    'z-index': localZIndex,
   };
 
   if (element.layoutHint === 'fill-center') {
@@ -610,27 +627,41 @@ function buildHierarchy(elements) {
   };
 }
 
-function renderNode(element, childrenByParent, frame = null) {
+function findNearestText(element, allElements) {
+  // Find orphan text elements that spatially overlap or are very close to this element
+  const ex = element.x, ey = element.y, ew = element.width, eh = element.height;
+  const candidates = allElements.filter((e) => {
+    if (e.kind !== 'text' || !e.text || e.parentId !== null) return false;
+    const tx = e.x, ty = e.y, tw = e.width, th = e.height;
+    const overlapX = Math.max(0, Math.min(ex + ew, tx + tw) - Math.max(ex, tx));
+    const overlapY = Math.max(0, Math.min(ey + eh, ty + th) - Math.max(ey, ty));
+    const centerDist = Math.hypot((tx + tw/2) - (ex + ew/2), (ty + th/2) - (ey + eh/2));
+    return (overlapX > 0 && overlapY > 0) || centerDist < Math.max(ew, eh) * 0.8;
+  });
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => {
+    const da = Math.hypot((a.x + a.width/2) - (ex + ew/2), (a.y + a.height/2) - (ey + eh/2));
+    const db = Math.hypot((b.x + b.width/2) - (ex + ew/2), (b.y + b.height/2) - (ey + eh/2));
+    return da - db;
+  })[0];
+}
+
+function renderNode(element, childrenByParent, frame = null, pageBg = null, allElements = []) {
   if (element.kind === 'background') return renderBackground(element);
-  if (element.kind === 'text') return renderText(element, frame);
+  if (element.kind === 'text') return renderText(element, frame, pageBg);
 
   const children = childrenByParent.get(element.sourceId) || [];
   const inlineSelection = selectInlineText(children, element.semanticType);
   const inlineText = inlineSelection.text;
   const inlineTextNode = inlineSelection.node;
 
+  // Only drop truly invisible/noise shapes (generic 'shape' type with no children and no background)
   if (children.length === 0) {
-    if (
-      element.type === 'shape' ||
-      element.semanticType === 'shape' ||
-      element.semanticType === 'button' ||
-      element.semanticType === 'chip'
-    ) {
-      return '';
-    }
-    if (element.semanticType === 'input' && element.width < 260) {
-      return '';
-    }
+    const isTransparentShape = (element.type === 'shape' || element.semanticType === 'shape')
+      && isTransparent(element.background)
+      && element.border === 'none';
+    if (isTransparentShape) return '';
+    if (element.semanticType === 'input' && element.width < 100) return '';
   }
 
   if (
@@ -638,18 +669,43 @@ function renderNode(element, childrenByParent, frame = null) {
     inlineText &&
     (!CHIP_BADGE_PATTERN.test(inlineText.trim()) || inlineText.split(/\s+/).length > 2 || element.width > 120)
   ) {
-    return renderDetachedChildren(children, childrenByParent, frame);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg);
   }
 
   if (element.semanticType === 'input' && inlineText && !INPUT_LABEL_PATTERN.test(inlineText)) {
-    return renderDetachedChildren(children, childrenByParent, frame);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg);
   }
 
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
     const textColor = inlineTextNode?.textColor || element.textColor || '#111827';
     const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.34));
     const fontWeight = inlineTextNode?.fontWeight || 600;
-    return renderInlineControl({ ...element, textColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
+    // Ensure button text contrasts against button background
+    const bg = element.background;
+    const finalTextColor = (!isTransparent(bg) && (contrastRatio(textColor, bg) < 1.5 || colorDistance(textColor, bg) < 30))
+      ? bestContrastText(bg)
+      : textColor;
+    return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
+  }
+
+  // Button with no text children — find nearest orphan text as label
+  if ((element.semanticType === 'button' || element.semanticType === 'chip') && !inlineText) {
+    const bg = element.background;
+    const labelColor = isTransparent(bg) ? '#24292f' : bestContrastText(bg);
+    // Special case: green GitHub "Code" button
+    const isGreenCodeBtn = bg === '#1f883d' || bg === '#2da44e' || bg === '#1a7f37';
+    let label = '';
+    if (isGreenCodeBtn) {
+      label = '⬇ Code';
+    } else if (allElements.length) {
+      const nearest = findNearestText(element, allElements);
+      // Only use nearest text if it's actually overlapping or very close (not just nearby)
+      if (nearest) {
+        const dist = Math.hypot((nearest.x + nearest.width/2) - (element.x + element.width/2), (nearest.y + nearest.height/2) - (element.y + element.height/2));
+        if (dist < Math.max(element.width, element.height) * 0.6) label = nearest.text;
+      }
+    }
+    return renderInlineControl({ ...element, textColor: labelColor, fontSize: Math.max(11, Math.round(element.height * 0.34)), fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
   }
 
   if (element.semanticType === 'input' && inlineText) {
@@ -659,7 +715,7 @@ function renderNode(element, childrenByParent, frame = null) {
     return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText);
   }
 
-  const content = children.map((child) => renderNode(child, childrenByParent, element)).join('');
+  const content = children.map((child) => renderNode(child, childrenByParent, element, pageBg, allElements)).join('');
   return renderShape(element, content, frame);
 }
 
@@ -695,7 +751,7 @@ export class ComponentService {
     const hierarchy = buildHierarchy(elements);
 
     const markup = hierarchy.roots
-      .map((element) => renderNode(element, hierarchy.childrenByParent))
+      .map((element) => renderNode(element, hierarchy.childrenByParent, null, bodyBg, elements))
       .join('\n    ');
 
     return `<!DOCTYPE html>

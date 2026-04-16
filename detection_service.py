@@ -77,6 +77,47 @@ def clean_ocr_text(text):
     if useful / max(len(text), 1) < 0.35:
         return ""
 
+    # Remove OCR garbage tokens while preserving real short words
+    COMMON_SHORT = {'a','an','as','at','be','by','do','go','he','if','in','is','it','me',
+                    'my','no','of','on','or','so','to','up','us','we','the','and','for',
+                    'not','but','are','was','has','had','its','via','ago','pin','add','new',
+                    'all','can','did','get','got','how','let','may','now','old','our','out',
+                    'own','put','say','see','set','she','too','try','use','way','who','why'}
+    words = text.split()
+    cleaned = []
+    for w in words:
+        wl = w.lower()
+        alpha = sum(c.isalpha() for c in w)
+        non_alpha = len(w) - alpha
+        # Always keep common short words
+        if wl in COMMON_SHORT:
+            cleaned.append(w)
+        # Keep long words
+        elif len(w) >= 4:
+            # Drop if has non-alpha symbols mixed in (OCR artifact like "Type(Z]", "jaa}")
+            if non_alpha > 0 and len(w) <= 6:
+                continue
+            cleaned.append(w)
+        # Drop 1-3 char tokens that aren't pure alpha (e.g. "[3", "fF", "Oo")
+        elif alpha == len(w):
+            # Drop 2-char mixed-case tokens (OCR artifacts: "fF", "Oo", "LX", "Cy", "py")
+            if len(w) == 2 and w[0].isupper() != w[1].isupper():
+                continue
+            # Drop 2-char all-lowercase that aren't common words
+            if len(w) == 2 and w.islower() and wl not in COMMON_SHORT:
+                continue
+            # Drop single letters that aren't common words
+            if len(w) == 1 and wl not in COMMON_SHORT:
+                continue
+            # Drop 2-char all-uppercase tokens that look like OCR artifacts (e.g. "BP", "AF", "SS", "LX")
+            if len(w) == 2 and w.isupper() and wl not in COMMON_SHORT:
+                continue
+            cleaned.append(w)
+    text = " ".join(cleaned)
+
+    if len(text) < 1:
+        return ""
+
     return text.strip()
 
 
@@ -123,7 +164,23 @@ def score_text_quality(text):
     unique_ratio = len(set(tokens)) / len(tokens)
     alpha_ratio = sum(any(char.isalpha() for char in token) for token in tokens) / len(tokens)
     duplicate_penalty = max(0, 1 - (len(tokens) - len(set(tokens))) / max(len(tokens), 1))
-    return (unique_ratio * 0.45) + (alpha_ratio * 0.35) + (duplicate_penalty * 0.20)
+
+    # Penalize OCR noise: high ratio of non-alphanumeric symbols
+    raw_tokens = text.split()
+    symbol_noise = sum(
+        1 for t in raw_tokens
+        if len(t) <= 3 and not t.isalpha() and not t.isdigit()
+    ) / max(len(raw_tokens), 1)
+
+    # Penalize mixed garbage: tokens that are 1-2 chars and non-word
+    garbage_ratio = sum(
+        1 for t in raw_tokens
+        if len(t) <= 2 and not t.isalpha()
+    ) / max(len(raw_tokens), 1)
+
+    noise_penalty = min(0.6, symbol_noise * 0.5 + garbage_ratio * 0.4)
+
+    return max(0.0, (unique_ratio * 0.40) + (alpha_ratio * 0.35) + (duplicate_penalty * 0.15) - noise_penalty)
 
 
 def iou(region_a, region_b):
@@ -571,6 +628,147 @@ def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width)
     if area_ratio > 0.015 and h > 28 and w > 90:
         return "panel"
     return "shape"
+
+
+def create_structural_bands(image, text_regions, shape_regions, page_background):
+    """
+    Inject structural container shapes (navbar, tab bar, content panels, sidebar)
+    that OpenCV misses because they're near-background color.
+    Uses text row clustering to infer where bands are.
+    """
+    height, width = image.shape[:2]
+    page_bg_hex = hex_from_bgr(page_background)
+    synthetic = []
+    next_id = 9000
+
+    # Group texts into horizontal rows
+    rows = []
+    for text in sorted(text_regions, key=lambda t: t["y"]):
+        mid_y = text["y"] + text["height"] / 2
+        placed = False
+        for row in rows:
+            if abs(mid_y - row["mid_y"]) <= max(12, text["height"] * 0.9):
+                row["texts"].append(text)
+                row["mid_y"] = sum(t["y"] + t["height"] / 2 for t in row["texts"]) / len(row["texts"])
+                row["min_y"] = min(row["min_y"], text["y"])
+                row["max_y"] = max(row["max_y"], text["y"] + text["height"])
+                placed = True
+                break
+        if not placed:
+            rows.append({"mid_y": mid_y, "min_y": text["y"], "max_y": text["y"] + text["height"], "texts": [text]})
+
+    def already_covered(x, y, w, h):
+        for s in shape_regions:
+            sx, sy, sw, sh = s["x"], s["y"], s["width"], s["height"]
+            ox = max(0, min(x + w, sx + sw) - max(x, sx))
+            oy = max(0, min(y + h, sy + sh) - max(y, sy))
+            if ox * oy > (w * h * 0.5):
+                return True
+        return False
+
+    def sample_band_color(y0, y1):
+        band = image[max(0, y0):min(height, y1), :, :]
+        if band.size == 0:
+            return page_bg_hex
+        return hex_from_bgr(np.median(band.reshape(-1, 3), axis=0))
+
+    # Track which y-ranges already have a band to avoid overlapping bands
+    placed_bands = []
+
+    def band_overlaps_existing(y, h):
+        for (by, bh) in placed_bands:
+            oy = max(0, min(y + h, by + bh) - max(y, by))
+            if oy > min(h, bh) * 0.5:
+                return True
+        return False
+
+    for row in rows:
+        if len(row["texts"]) < 2:
+            continue
+        min_x = min(t["x"] for t in row["texts"])
+        max_x = max(t["x"] + t["width"] for t in row["texts"])
+        if (max_x - min_x) < width * 0.25:
+            continue
+
+        row_y = int(row["min_y"])
+        row_h = int(row["max_y"] - row["min_y"])
+        pad_y = max(6, int(row_h * 0.4))
+        band_y = max(0, row_y - pad_y)
+        band_h = min(height - band_y, row_h + pad_y * 2)
+
+        if already_covered(0, band_y, width, band_h):
+            continue
+        if band_overlaps_existing(band_y, band_h):
+            continue
+
+        band_color = sample_band_color(band_y, band_y + band_h)
+        if hex_distance(band_color, page_bg_hex) < 8:
+            band_color = "#f6f8fa" if page_bg_hex in ("#ffffff", "#f6f8fa", "#e6e9eb") else "#2d333b"
+
+        y_ratio = row_y / height
+        band_type = "toolbar" if y_ratio < 0.25 else "panel"
+        band_z = 5 if y_ratio < 0.12 else (4 if y_ratio < 0.25 else 3)
+
+        synthetic.append({
+            "id": next_id,
+            "kind": "shape",
+            "type": band_type,
+            "text": "",
+            "x": 0,
+            "y": band_y,
+            "width": width,
+            "height": band_h,
+            "area": width * band_h,
+            "background_color": band_color,
+            "border_color": "transparent",
+            "border_width": 0,
+            "border_radius": 0,
+            "text_color": "transparent",
+            "font_size": 0,
+            "font_weight": 0,
+            "text_align": "left",
+            "z_index": band_z,
+            "linked_text_count": len(row["texts"]),
+            "nesting_level": 0,
+        })
+        placed_bands.append((band_y, band_h))
+        next_id += 1
+
+    # Sidebar: texts clustering on right side across many rows
+    right_texts = [t for t in text_regions if t["x"] > width * 0.65]
+    if len(right_texts) >= 4:
+        min_y = min(t["y"] for t in right_texts)
+        max_y = max(t["y"] + t["height"] for t in right_texts)
+        min_x = max(0, min(t["x"] for t in right_texts) - 16)
+        sidebar_w = width - min_x
+        if sidebar_w > 80 and not already_covered(min_x, min_y - 10, sidebar_w, max_y - min_y + 20):
+            sidebar_color = sample_band_color(min_y, max_y)
+            if hex_distance(sidebar_color, page_bg_hex) < 8:
+                sidebar_color = "#f6f8fa"
+            synthetic.append({
+                "id": next_id,
+                "kind": "shape",
+                "type": "panel",
+                "text": "",
+                "x": int(min_x),
+                "y": int(min_y - 10),
+                "width": int(sidebar_w),
+                "height": int(max_y - min_y + 20),
+                "area": int(sidebar_w * (max_y - min_y + 20)),
+                "background_color": sidebar_color,
+                "border_color": "transparent",
+                "border_width": 0,
+                "border_radius": 0,
+                "text_color": "transparent",
+                "font_size": 0,
+                "font_weight": 0,
+                "text_align": "left",
+                "z_index": 2,
+                "linked_text_count": len(right_texts),
+                "nesting_level": 0,
+            })
+
+    return synthetic
 
 
 def detect_shape_regions(image, text_regions, page_background):
@@ -1124,10 +1322,38 @@ def prune_detected_elements(elements):
                 continue
             if len(words) == 1 and len(text) <= 2:
                 continue
-            if quality < 0.30 and len(text) < 12:
+            if quality < 0.35 and len(text) < 16:
                 continue
             if element["width"] < 24 and element["height"] < 12:
                 continue
+            # Re-clean text to remove OCR garbage tokens
+            recleaned = clean_ocr_text(text)
+            if not recleaned:
+                continue
+            if recleaned != text:
+                element = dict(element)
+                element["text"] = recleaned
+                text = recleaned
+                words = text.split()
+            # Drop pure OCR noise: short texts with high symbol ratio
+            alpha_chars = sum(c.isalpha() for c in text)
+            if len(text) <= 8 and alpha_chars / max(len(text), 1) < 0.5:
+                continue
+            # Drop texts that are mostly non-word tokens
+            non_word_tokens = sum(1 for w in words if not re.match(r'^[a-zA-Z0-9_\-\.]+$', w))
+            if len(words) <= 4 and non_word_tokens / max(len(words), 1) > 0.5:
+                continue
+            # Drop single-word texts that are 1-2 chars (noise like "at", "to", "On")
+            # unless they are meaningful standalone labels
+            MEANINGFUL_SHORT = {'ok', 'no', 'go', 'up', 'id', 'ui', 'api', 'css', 'git', 'url', 'ssh'}
+            if len(words) == 1 and len(text) <= 3 and text.lower() not in MEANINGFUL_SHORT:
+                continue
+            # Drop texts where first word is a single uppercase letter (OCR artifact prefix like "A Activity", "B Projects")
+            if len(words) >= 2 and len(words[0]) == 1 and words[0].isupper():
+                element = dict(element)
+                element["text"] = " ".join(words[1:])
+                text = element["text"]
+                words = text.split()
 
         kept.append(element)
 
@@ -1375,6 +1601,7 @@ def detect_ui_elements(image_path):
     synthetic_inputs = create_synthetic_input_containers(image, text_regions, shape_regions)
     shape_regions.extend(synthetic_inputs)
     shape_regions.extend(create_synthetic_text_containers(shape_regions + text_regions))
+    # Inject structural bands (navbar, tab bar, content panels, sidebar) missed by contour detection
 
     background = {
         "kind": "background",
@@ -1398,6 +1625,10 @@ def detect_ui_elements(image_path):
 
     elements = [background] + shape_regions + text_regions
     elements = assign_relationships(filter_regions(elements))
+    # Add structural bands AFTER filter_regions so they aren't removed by overlap logic
+    structural_bands = create_structural_bands(image, text_regions, shape_regions, page_background)
+    if structural_bands:
+        elements = structural_bands + elements  # bands go behind everything
     elements = prune_detected_elements(elements)
     elements = stabilize_element_coordinates(elements, width, height)
     elements = [normalize_component(element, width, height) for element in elements]

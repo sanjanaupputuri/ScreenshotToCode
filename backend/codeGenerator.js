@@ -15,6 +15,8 @@ export async function generateCode(imagePath) {
   console.log('='.repeat(60));
 
   const detection = await DetectionService.detectElements(imagePath);
+
+  // Stage 1b: Ollama layout refinement (identify page type, suppress noise)
   const refinement = await LayoutRefiner.refine(detection);
   const hiddenIds = new Set(refinement.hide_shape_ids || []);
   const detectedElements = (detection.components || []).filter((element) => {
@@ -25,16 +27,14 @@ export async function generateCode(imagePath) {
 
   console.log(`Detected ${detectedElements.length} elements`);
   if (refinement.page_kind && refinement.page_kind !== 'generic') {
-    console.log(`Refined page kind: ${refinement.page_kind}`);
+    console.log(`Page kind: ${refinement.page_kind}`);
   }
   if (hiddenIds.size > 0) {
-    console.log(`Suppressed ${hiddenIds.size} noisy shapes via layout refinement`);
+    console.log(`Suppressed ${hiddenIds.size} noisy shapes`);
   }
   logElements(detectedElements);
 
-  if (detectedElements.length === 0) {
-    return getFallbackCode();
-  }
+  if (detectedElements.length === 0) return getFallbackCode();
 
   console.log('\n' + '='.repeat(60));
   console.log('STAGE 2: NORMALIZING FOR RENDERING');
@@ -44,10 +44,25 @@ export async function generateCode(imagePath) {
   console.log(`Prepared ${processed.elements.length} renderable elements`);
 
   console.log('\n' + '='.repeat(60));
-  console.log('STAGE 3: GENERATING FAITHFUL HTML/CSS');
+  console.log('STAGE 3: GENERATING BASE HTML/CSS (ComponentService)');
   console.log('='.repeat(60));
 
-  return ComponentService.generateHTML(processed);
+  const baseHTML = ComponentService.generateHTML(processed);
+  console.log(`Base HTML: ${baseHTML.length} chars`);
+
+  console.log('\n' + '='.repeat(60));
+  console.log('STAGE 4: OLLAMA VISUAL REFINEMENT');
+  console.log('='.repeat(60));
+
+  // Ollama refines the base HTML — improves visual accuracy without changing coordinates
+  const refinedHTML = await LayoutRefiner.refineHTML(
+    baseHTML,
+    detectedElements,
+    image,
+    refinement.page_kind || 'generic',
+  );
+
+  return refinedHTML;
 }
 
 function getFallbackCode() {
@@ -59,21 +74,8 @@ function getFallbackCode() {
   <title>Generated Page</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: #f3f4f6;
-      font-family: "Inter", "Segoe UI", sans-serif;
-    }
-    .empty-state {
-      padding: 32px;
-      border-radius: 20px;
-      background: white;
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
-      color: #111827;
-    }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f3f4f6; font-family: "Inter", "Segoe UI", sans-serif; }
+    .empty-state { padding: 32px; border-radius: 20px; background: white; box-shadow: 0 16px 40px rgba(15,23,42,0.12); color: #111827; }
   </style>
 </head>
 <body>
