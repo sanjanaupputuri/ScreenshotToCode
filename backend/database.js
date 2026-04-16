@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import crypto from 'crypto';
@@ -7,117 +7,165 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = join(__dirname, 'database.sqlite');
 
 let db;
+let initializationPromise;
 
-function getDb() {
-  if (!db) db = new Database(DB_PATH);
+function openDb() {
+  if (db) return db;
+  db = new sqlite3.Database(DB_PATH);
   return db;
 }
 
-export function initializeDatabase() {
-  const db = getDb();
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT,
-      name TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS generated_codes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      code TEXT,
-      image_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS components (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      category TEXT NOT NULL,
-      html_template TEXT NOT NULL,
-      css_template TEXT,
-      description TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS component_rules (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      component_id INTEGER,
-      rule_type TEXT NOT NULL,
-      min_value REAL,
-      max_value REAL,
-      text_condition TEXT,
-      color_condition TEXT,
-      FOREIGN KEY (component_id) REFERENCES components(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS colors (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      hex_value TEXT UNIQUE NOT NULL,
-      tailwind_class TEXT NOT NULL,
-      category TEXT NOT NULL,
-      color_name TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS spacing (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      pixel_value INTEGER UNIQUE NOT NULL,
-      tailwind_class TEXT NOT NULL,
-      rem_value REAL NOT NULL,
-      spacing_type TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS primitive_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      base_kind TEXT NOT NULL,
-      target_type TEXT NOT NULL,
-      min_aspect REAL,
-      max_aspect REAL,
-      min_width REAL,
-      max_width REAL,
-      min_height REAL,
-      max_height REAL,
-      text_pattern TEXT,
-      fill_mode TEXT,
-      z_index INTEGER DEFAULT 10,
-      priority INTEGER DEFAULT 1,
-      text_role TEXT,
-      description TEXT
-    );
-  `);
-
-  populateInitialData(db);
-  console.log('SQLite database initialized');
+function exec(sql) {
+  return new Promise((resolve, reject) => {
+    openDb().exec(sql, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
-function populateInitialData(db) {
-  const componentCount = db.prepare('SELECT COUNT(*) as c FROM components').get().c;
-  const primitiveProfileCount = db.prepare('SELECT COUNT(*) as c FROM primitive_profiles').get().c;
-  const colorCount = db.prepare('SELECT COUNT(*) as c FROM colors').get().c;
-  const spacingCount = db.prepare('SELECT COUNT(*) as c FROM spacing').get().c;
+function run(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    openDb().run(sql, params, function onRun(error) {
+      if (error) reject(error);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function get(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    openDb().get(sql, params, (error, row) => {
+      if (error) reject(error);
+      else resolve(row ?? null);
+    });
+  });
+}
+
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    openDb().all(sql, params, (error, rows) => {
+      if (error) reject(error);
+      else resolve(rows ?? []);
+    });
+  });
+}
+
+async function withTransaction(callback) {
+  await exec('BEGIN');
+  try {
+    const result = await callback();
+    await exec('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await exec('ROLLBACK');
+    } catch {
+      // Ignore rollback failure and surface the original error.
+    }
+    throw error;
+  }
+}
+
+export async function initializeDatabase() {
+  if (initializationPromise) {
+    await initializationPromise;
+    return;
+  }
+
+  initializationPromise = (async () => {
+    await exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT,
+        name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS generated_codes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        code TEXT,
+        image_url TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS components (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        category TEXT NOT NULL,
+        html_template TEXT NOT NULL,
+        css_template TEXT,
+        description TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS component_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        component_id INTEGER,
+        rule_type TEXT NOT NULL,
+        min_value REAL,
+        max_value REAL,
+        text_condition TEXT,
+        color_condition TEXT,
+        FOREIGN KEY (component_id) REFERENCES components(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS colors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hex_value TEXT UNIQUE NOT NULL,
+        tailwind_class TEXT NOT NULL,
+        category TEXT NOT NULL,
+        color_name TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS spacing (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pixel_value INTEGER UNIQUE NOT NULL,
+        tailwind_class TEXT NOT NULL,
+        rem_value REAL NOT NULL,
+        spacing_type TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS primitive_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        base_kind TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        min_aspect REAL,
+        max_aspect REAL,
+        min_width REAL,
+        max_width REAL,
+        min_height REAL,
+        max_height REAL,
+        text_pattern TEXT,
+        fill_mode TEXT,
+        z_index INTEGER DEFAULT 10,
+        priority INTEGER DEFAULT 1,
+        text_role TEXT,
+        description TEXT
+      );
+    `);
+
+    await populateInitialData();
+    console.log('SQLite database initialized');
+  })();
+
+  try {
+    await initializationPromise;
+  } catch (error) {
+    initializationPromise = null;
+    throw error;
+  }
+}
+
+async function populateInitialData() {
+  const componentCount = (await get('SELECT COUNT(*) as c FROM components'))?.c ?? 0;
+  const primitiveProfileCount = (await get('SELECT COUNT(*) as c FROM primitive_profiles'))?.c ?? 0;
+  const colorCount = (await get('SELECT COUNT(*) as c FROM colors'))?.c ?? 0;
+  const spacingCount = (await get('SELECT COUNT(*) as c FROM spacing'))?.c ?? 0;
 
   if (componentCount > 0 && primitiveProfileCount > 0 && colorCount > 0 && spacingCount > 0) return;
-
-  const insertComponent = db.prepare(
-    'INSERT OR IGNORE INTO components (name, category, html_template, css_template, description) VALUES (?, ?, ?, ?, ?)'
-  );
-  const insertRule = db.prepare(
-    'INSERT INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)'
-  );
-  const insertColor = db.prepare(
-    'INSERT OR IGNORE INTO colors (hex_value, tailwind_class, category, color_name) VALUES (?, ?, ?, ?)'
-  );
-  const insertSpacing = db.prepare(
-    'INSERT OR IGNORE INTO spacing (pixel_value, tailwind_class, rem_value, spacing_type) VALUES (?, ?, ?, ?)'
-  );
-  const insertPrimitiveProfile = db.prepare(`
-    INSERT OR IGNORE INTO primitive_profiles
-    (name, base_kind, target_type, min_aspect, max_aspect, min_width, max_width, min_height, max_height, text_pattern, fill_mode, z_index, priority, text_role, description)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
 
   const components = [
     [1, 'button_primary', 'form', '<button class="{{classes}}">{{text}}</button>', '', 'Primary button'],
@@ -131,28 +179,21 @@ function populateInitialData(db) {
   ];
 
   const rules = [
-    // button: wide, short, has text
     [1, 'aspect_ratio', 2.0, 6.0, 'required', 'bright'],
     [1, 'width', 60, 350, null, null],
     [1, 'height', 25, 65, null, null],
-    // input: very wide, short
     [2, 'aspect_ratio', 4.0, 15.0, 'optional', 'neutral'],
     [2, 'width', 100, 500, null, null],
     [2, 'height', 20, 55, null, null],
-    // h1: tall text
     [3, 'height', 45, 100, 'required', 'any'],
     [3, 'width', 200, 800, null, null],
-    // h2
     [4, 'height', 30, 65, 'required', 'any'],
     [4, 'width', 150, 700, null, null],
-    // card: squarish, large
     [5, 'aspect_ratio', 0.5, 2.5, 'optional', 'any'],
     [5, 'width', 150, 800, null, null],
     [5, 'height', 100, 600, null, null],
-    // paragraph: wide, tall, lots of text
     [6, 'aspect_ratio', 3.0, 20.0, 'required', 'any'],
     [6, 'width', 200, 900, null, null],
-    // image: large, no text
     [8, 'width', 100, 1000, null, null],
     [8, 'height', 100, 800, null, null],
   ];
@@ -190,50 +231,77 @@ function populateInitialData(db) {
     ['body_copy', 'text', 'body_text', 1.0, 80.0, 8, 2400, 8, 52, null, 'any', 20, 3, 'body', 'General body copy'],
   ];
 
-  const tx = db.transaction(() => {
-    for (const [, name, cat, html, css, desc] of components) insertComponent.run(name, cat, html, css, desc);
-    // Get actual IDs after insert
-    const compMap = {};
-    for (const c of db.prepare('SELECT id, name FROM components').all()) {
-      compMap[c.name] = c.id;
+  const compNames = ['button_primary', 'input_text', 'heading_h1', 'heading_h2', 'card_basic', 'paragraph', 'nav_link', 'image_basic'];
+
+  await withTransaction(async () => {
+    for (const [, name, cat, html, css, desc] of components) {
+      await run(
+        'INSERT OR IGNORE INTO components (name, category, html_template, css_template, description) VALUES (?, ?, ?, ?, ?)',
+        [name, cat, html, css, desc],
+      );
     }
-    const compNames = ['button_primary','input_text','heading_h1','heading_h2','card_basic','paragraph','nav_link','image_basic'];
+
     for (const [idx, ruleType, min, max, textCond, colorCond] of rules) {
-      const compId = db.prepare('SELECT id FROM components WHERE name = ?').get(compNames[idx - 1])?.id;
-      if (compId) insertRule.run(compId, ruleType, min, max, textCond, colorCond);
+      const compId = (await get('SELECT id FROM components WHERE name = ?', [compNames[idx - 1]]))?.id;
+      if (compId) {
+        await run(
+          'INSERT INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)',
+          [compId, ruleType, min, max, textCond, colorCond],
+        );
+      }
     }
-    for (const [hex, tw, cat, name] of colors) insertColor.run(hex, tw, cat, name);
-    for (const [px, tw, rem, type] of spacing) insertSpacing.run(px, tw, rem, type);
-    for (const profile of primitiveProfiles) insertPrimitiveProfile.run(...profile);
+
+    for (const [hex, tw, cat, name] of colors) {
+      await run(
+        'INSERT OR IGNORE INTO colors (hex_value, tailwind_class, category, color_name) VALUES (?, ?, ?, ?)',
+        [hex, tw, cat, name],
+      );
+    }
+
+    for (const [px, tw, rem, type] of spacing) {
+      await run(
+        'INSERT OR IGNORE INTO spacing (pixel_value, tailwind_class, rem_value, spacing_type) VALUES (?, ?, ?, ?)',
+        [px, tw, rem, type],
+      );
+    }
+
+    for (const profile of primitiveProfiles) {
+      await run(
+        `INSERT OR IGNORE INTO primitive_profiles
+        (name, base_kind, target_type, min_aspect, max_aspect, min_width, max_width, min_height, max_height, text_pattern, fill_mode, z_index, priority, text_role, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        profile,
+      );
+    }
   });
 
-  tx();
   console.log('Initial data populated');
 }
 
-export function classifyElement(elementData) {
-  const db = getDb();
+export async function classifyElement(elementData) {
+  await initializeDatabase();
   const { width, height, hasText, type, aspect_ratio } = elementData;
   const ar = aspect_ratio || (width / (height || 1));
   const hasTextVal = hasText ? 1 : 0;
 
   try {
-    const rows = db.prepare(`
-      SELECT c.id, c.name, c.category, COUNT(*) as score
-      FROM components c
-      JOIN component_rules cr ON c.id = cr.component_id
-      WHERE (cr.rule_type = 'aspect_ratio' AND ? BETWEEN cr.min_value AND cr.max_value)
-         OR (cr.rule_type = 'width' AND ? BETWEEN cr.min_value AND cr.max_value)
-         OR (cr.rule_type = 'height' AND ? BETWEEN cr.min_value AND cr.max_value)
-         OR (cr.text_condition = 'required' AND ? = 1)
-         OR (cr.text_condition = 'optional')
-      GROUP BY c.id, c.name, c.category
-      ORDER BY score DESC
-      LIMIT 1
-    `).get(ar, width, height, hasTextVal);
+    const row = await get(
+      `SELECT c.id, c.name, c.category, COUNT(*) as score
+       FROM components c
+       JOIN component_rules cr ON c.id = cr.component_id
+       WHERE (cr.rule_type = 'aspect_ratio' AND ? BETWEEN cr.min_value AND cr.max_value)
+          OR (cr.rule_type = 'width' AND ? BETWEEN cr.min_value AND cr.max_value)
+          OR (cr.rule_type = 'height' AND ? BETWEEN cr.min_value AND cr.max_value)
+          OR (cr.text_condition = 'required' AND ? = 1)
+          OR (cr.text_condition = 'optional')
+       GROUP BY c.id, c.name, c.category
+       ORDER BY score DESC
+       LIMIT 1`,
+      [ar, width, height, hasTextVal],
+    );
 
-    if (rows && rows.score > 0) {
-      return rows;
+    if (row && row.score > 0) {
+      return row;
     }
   } catch (error) {
     console.warn('Classification query error:', error.message);
@@ -241,61 +309,65 @@ export function classifyElement(elementData) {
 
   if (type) {
     const typeMapping = {
-      'button': 'button_primary',
-      'input': 'input_text',
-      'heading': 'heading_h1',
-      'paragraph': 'paragraph',
-      'card': 'card_basic',
-      'image': 'image_basic',
-      'navigation': 'nav_link',
-      'header': 'heading_h1'
+      button: 'button_primary',
+      input: 'input_text',
+      heading: 'heading_h1',
+      paragraph: 'paragraph',
+      card: 'card_basic',
+      image: 'image_basic',
+      navigation: 'nav_link',
+      header: 'heading_h1',
     };
 
     const mappedName = typeMapping[type];
     if (mappedName) {
-      const byType = db.prepare('SELECT id, name, category FROM components WHERE name = ?').get(mappedName);
+      const byType = await get('SELECT id, name, category FROM components WHERE name = ?', [mappedName]);
       if (byType) {
         return { ...byType, score: 5 };
       }
     }
   }
 
-  const defaultComp = db.prepare('SELECT id, name, category FROM components WHERE name = ?').get('card_basic');
+  const defaultComp = await get('SELECT id, name, category FROM components WHERE name = ?', ['card_basic']);
   return defaultComp ? { ...defaultComp, score: 0 } : null;
 }
 
-export function getComponentTemplate(componentId) {
-  return getDb().prepare('SELECT html_template, css_template FROM components WHERE id = ?').get(componentId);
+export async function getComponentTemplate(componentId) {
+  await initializeDatabase();
+  return get('SELECT html_template, css_template FROM components WHERE id = ?', [componentId]);
 }
 
-export function getColorClass(hexColor) {
-  return getDb().prepare('SELECT tailwind_class FROM colors WHERE UPPER(hex_value) = UPPER(?)').get(hexColor);
+export async function getColorClass(hexColor) {
+  await initializeDatabase();
+  return get('SELECT tailwind_class FROM colors WHERE UPPER(hex_value) = UPPER(?)', [hexColor]);
 }
 
-export function getSpacingClass(pixelValue) {
-  return getDb().prepare(
-    'SELECT tailwind_class FROM spacing WHERE pixel_value <= ? ORDER BY pixel_value DESC LIMIT 1'
-  ).get(pixelValue);
+export async function getSpacingClass(pixelValue) {
+  await initializeDatabase();
+  return get(
+    'SELECT tailwind_class FROM spacing WHERE pixel_value <= ? ORDER BY pixel_value DESC LIMIT 1',
+    [pixelValue],
+  );
 }
 
-export function saveUser(uid, email, name) {
-  getDb().prepare(
-    'INSERT OR REPLACE INTO users (id, email, name) VALUES (?, ?, ?)'
-  ).run(uid, email, name);
+export async function saveUser(uid, email, name) {
+  await initializeDatabase();
+  await run('INSERT OR REPLACE INTO users (id, email, name) VALUES (?, ?, ?)', [uid, email, name]);
 }
 
-export function saveGeneratedCode(userId, code, imageUrl) {
+export async function saveGeneratedCode(userId, code, imageUrl) {
+  await initializeDatabase();
   const id = crypto.randomUUID();
-  getDb().prepare(
-    'INSERT INTO generated_codes (id, user_id, code, image_url) VALUES (?, ?, ?, ?)'
-  ).run(id, userId, code, imageUrl);
+  await run('INSERT INTO generated_codes (id, user_id, code, image_url) VALUES (?, ?, ?, ?)', [id, userId, code, imageUrl]);
   return { id };
 }
 
-export function getUserHistory(userId) {
-  return getDb().prepare(
-    'SELECT id, user_id, image_url, created_at, SUBSTR(code, 1, 200) as code_preview, code FROM generated_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 50'
-  ).all(userId);
+export async function getUserHistory(userId) {
+  await initializeDatabase();
+  return all(
+    'SELECT id, user_id, image_url, created_at, SUBSTR(code, 1, 200) as code_preview, code FROM generated_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+    [userId],
+  );
 }
 
 function textMatchesPattern(text, pattern) {
@@ -347,9 +419,9 @@ function scoreProfileMatch(element, profile) {
   return score;
 }
 
-export function enrichDetectedElements(elements = []) {
-  initializeDatabase();
-  const profiles = getDb().prepare('SELECT * FROM primitive_profiles ORDER BY priority DESC, id ASC').all();
+export async function enrichDetectedElements(elements = []) {
+  await initializeDatabase();
+  const profiles = await all('SELECT * FROM primitive_profiles ORDER BY priority DESC, id ASC');
 
   return elements.map((element) => {
     let bestProfile = null;

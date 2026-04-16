@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 
-const API_BASE = "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 
 // ── CodeBlock ─────────────────────────────────────────────────────────────────
 function CodeBlock({ code, onSave, saving, saved }) {
@@ -196,10 +196,17 @@ export default function ChatScreen({ user, onLogout }) {
   const [status, setStatus] = useState({ python_service: null, ollama: null });
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const activeUploadRef = useRef({ id: null, controller: null });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      activeUploadRef.current.controller?.abort();
+    };
+  }, []);
 
   // Poll service status
   useEffect(() => {
@@ -221,29 +228,52 @@ export default function ChatScreen({ user, onLogout }) {
     if (!file) return;
     e.target.value = "";
 
+    activeUploadRef.current.controller?.abort();
+    const uploadId = `${Date.now()}-${crypto.randomUUID()}`;
+    const controller = new AbortController();
+    activeUploadRef.current = { id: uploadId, controller };
+
     const previewUrl = URL.createObjectURL(file);
     setMessages(prev => [...prev, { sender: "user", text: `📸 ${file.name}`, image: previewUrl }]);
     setLoading(true);
+    console.log(`[upload:${uploadId}] selected file`, {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: file.lastModified
+    });
 
     try {
       const formData = new FormData();
       formData.append("image", file);
 
       const token = await getToken();
-      const res = await fetch(`${API_BASE}/api/upload`, {
+      const res = await fetch(`${API_BASE}/api/upload?uploadId=${encodeURIComponent(uploadId)}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Upload-Id": uploadId
+        },
+        body: formData,
+        cache: "no-store",
+        signal: controller.signal
       });
 
       const result = await res.json();
+      console.log(`[upload:${uploadId}] response`, result);
+
+      if (activeUploadRef.current.id !== uploadId) {
+        console.warn(`[upload:${uploadId}] ignoring stale response`);
+        return;
+      }
 
       if (result.success) {
         setMessages(prev => [...prev, {
           sender: "bot",
           text: "✅ Code generated successfully!",
           code: result.code,
-          imageUrl: result.imageUrl
+          imageUrl: result.imageUrl,
+          requestId: result.requestId || uploadId
         }]);
       } else {
         setMessages(prev => [...prev, {
@@ -252,14 +282,21 @@ export default function ChatScreen({ user, onLogout }) {
           isError: true
         }]);
       }
-    } catch {
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.warn(`[upload:${uploadId}] aborted`);
+        return;
+      }
       setMessages(prev => [...prev, {
         sender: "bot",
-        text: "❌ Could not reach the backend. Make sure it's running on port 3001.",
+        text: `❌ ${error.message || "Could not reach the backend. Make sure it's running on port 3001."}`,
         isError: true
       }]);
     } finally {
-      setLoading(false);
+      if (activeUploadRef.current.id === uploadId) {
+        setLoading(false);
+        activeUploadRef.current = { id: null, controller: null };
+      }
     }
   };
 

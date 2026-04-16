@@ -720,12 +720,13 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
 }
 
 export class ComponentService {
-  static processElements(
+  static async processElements(
     elements = [],
     image = { width: 1440, height: 900, background_color: '#ffffff' },
     refinement = { page_kind: 'generic', hide_shape_ids: [], notes: [] },
   ) {
-    const normalized = enrichDetectedElements(elements)
+    const enriched = await enrichDetectedElements(elements);
+    const normalized = enriched
       .map((element, index) => normalizeElement(element, index))
       .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y) || (a.x - b.x));
     applyParentAnchoring(normalized, image);

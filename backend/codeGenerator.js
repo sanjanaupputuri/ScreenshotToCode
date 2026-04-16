@@ -9,10 +9,18 @@ function logElements(elements) {
   }
 }
 
-export async function generateCode(imagePath) {
+export async function generateCode(imagePath, metadata = {}) {
+  const requestLabel = metadata.requestId ? `[upload:${metadata.requestId}] ` : '';
   console.log('='.repeat(60));
-  console.log('STAGE 1: DETECTING UI ELEMENTS (Python/OpenCV/OCR)');
+  console.log(`${requestLabel}STAGE 1: DETECTING UI ELEMENTS (Python/OpenCV/OCR)`);
   console.log('='.repeat(60));
+  console.log(`${requestLabel}Input image`, {
+    imagePath,
+    fileHash: metadata.fileHash,
+    fileSize: metadata.fileSize,
+    originalName: metadata.originalName,
+    storedName: metadata.storedName,
+  });
 
   const detection = await DetectionService.detectElements(imagePath);
 
@@ -25,33 +33,33 @@ export async function generateCode(imagePath) {
   });
   const image = detection.image || { width: 1440, height: 900 };
 
-  console.log(`Detected ${detectedElements.length} elements`);
+  console.log(`${requestLabel}Detected ${detectedElements.length} elements`);
   if (refinement.page_kind && refinement.page_kind !== 'generic') {
-    console.log(`Page kind: ${refinement.page_kind}`);
+    console.log(`${requestLabel}Page kind: ${refinement.page_kind}`);
   }
   if (hiddenIds.size > 0) {
-    console.log(`Suppressed ${hiddenIds.size} noisy shapes`);
+    console.log(`${requestLabel}Suppressed ${hiddenIds.size} noisy shapes`);
   }
   logElements(detectedElements);
 
   if (detectedElements.length === 0) return getFallbackCode();
 
   console.log('\n' + '='.repeat(60));
-  console.log('STAGE 2: NORMALIZING FOR RENDERING');
+  console.log(`${requestLabel}STAGE 2: NORMALIZING FOR RENDERING`);
   console.log('='.repeat(60));
 
-  const processed = ComponentService.processElements(detectedElements, image, refinement);
-  console.log(`Prepared ${processed.elements.length} renderable elements`);
+  const processed = await ComponentService.processElements(detectedElements, image, refinement);
+  console.log(`${requestLabel}Prepared ${processed.elements.length} renderable elements`);
 
   console.log('\n' + '='.repeat(60));
-  console.log('STAGE 3: GENERATING BASE HTML/CSS (ComponentService)');
+  console.log(`${requestLabel}STAGE 3: GENERATING BASE HTML/CSS (ComponentService)`);
   console.log('='.repeat(60));
 
   const baseHTML = ComponentService.generateHTML(processed);
-  console.log(`Base HTML: ${baseHTML.length} chars`);
+  console.log(`${requestLabel}Base HTML: ${baseHTML.length} chars`);
 
   console.log('\n' + '='.repeat(60));
-  console.log('STAGE 4: OLLAMA VISUAL REFINEMENT');
+  console.log(`${requestLabel}STAGE 4: OLLAMA VISUAL REFINEMENT`);
   console.log('='.repeat(60));
 
   // Ollama refines the base HTML — improves visual accuracy without changing coordinates
@@ -62,6 +70,7 @@ export async function generateCode(imagePath) {
     refinement.page_kind || 'generic',
   );
 
+  console.log(`${requestLabel}Final HTML length: ${refinedHTML.length}`);
   return refinedHTML;
 }
 
