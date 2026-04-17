@@ -116,6 +116,9 @@ function normalizeElement(raw, index) {
 
   const sourceId = Number.isFinite(raw.id) ? Number(raw.id) : index;
 
+  // Use _direct_text if available (for buttons/chips with directly extracted text)
+  const elementText = raw._direct_text || raw.text || '';
+
   return {
     id: `${kind}-${sourceId}`,
     sourceId,
@@ -123,7 +126,7 @@ function normalizeElement(raw, index) {
     type: raw.type || kind,
     semanticType,
     textRole,
-    text: raw.text || '',
+    text: elementText,
     x: Number(raw.x) || 0,
     y: Number(raw.y) || 0,
     width: Number(raw.width) || 1,
@@ -688,24 +691,26 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
   }
 
-  // Button with no text children — find nearest orphan text as label
+  // Button with no text children — use direct_text from detection, then nearest orphan
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && !inlineText) {
     const bg = element.background;
     const labelColor = isTransparent(bg) ? '#24292f' : bestContrastText(bg);
-    // Special case: green GitHub "Code" button
-    const isGreenCodeBtn = bg === '#1f883d' || bg === '#2da44e' || bg === '#1a7f37';
-    let label = '';
-    if (isGreenCodeBtn) {
-      label = '⬇ Code';
-    } else if (allElements.length) {
-      const nearest = findNearestText(element, allElements);
-      // Only use nearest text if it's actually overlapping or very close (not just nearby)
-      if (nearest) {
-        const dist = Math.hypot((nearest.x + nearest.width/2) - (element.x + element.width/2), (nearest.y + nearest.height/2) - (element.y + element.height/2));
-        if (dist < Math.max(element.width, element.height) * 0.6) label = nearest.text;
+    let label = element.text || '';  // Use _direct_text if available
+    if (!label) {
+      const isGreenCodeBtn = bg === '#1f883d' || bg === '#2da44e' || bg === '#1a7f37';
+      if (isGreenCodeBtn) {
+        label = '⬇ Code';
+      } else if (allElements.length) {
+        const nearest = findNearestText(element, allElements);
+        if (nearest) {
+          const dist = Math.hypot((nearest.x + nearest.width/2) - (element.x + element.width/2), (nearest.y + nearest.height/2) - (element.y + element.height/2));
+          if (dist < Math.max(element.width, element.height) * 0.6) label = nearest.text;
+        }
       }
     }
-    return renderInlineControl({ ...element, textColor: labelColor, fontSize: Math.max(11, Math.round(element.height * 0.34)), fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
+    const fontSize = Math.max(11, Math.round(element.height * 0.34));
+    const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;
+    return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
   }
 
   if (element.semanticType === 'input' && inlineText) {
