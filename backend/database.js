@@ -372,9 +372,15 @@ export function enrichDetectedElements(elements = []) {
       };
     }
 
+    // Don't upgrade a generic 'shape' to 'button' via profile matching —
+    // only real button/chip/input detections should be rendered as interactive controls.
+    const rawType = element.type;
+    const profileType = bestProfile.target_type;
+    const isControlUpgrade = rawType === 'shape' && ['button', 'chip', 'input'].includes(profileType);
+
     return {
       ...element,
-      semantic_type: bestProfile.target_type,
+      semantic_type: isControlUpgrade ? rawType : profileType,
       text_role: bestProfile.text_role || (element.kind === 'text' ? 'body' : 'container'),
       z_index: bestProfile.z_index ?? element.z_index ?? 10,
       profile_name: bestProfile.name,

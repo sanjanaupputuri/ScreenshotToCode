@@ -19,7 +19,7 @@ function runPythonDetection(imagePath) {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('Python CLI detection timed out'));
-    }, 20000);
+    }, 60000);
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -53,43 +53,19 @@ function runPythonDetection(imagePath) {
 export class DetectionService {
 
   static async detectElements(imagePath, useRegions = false) {
-    // Use absolute path - resolve relative to project root
     const absPath = path.isAbsolute(imagePath)
       ? imagePath
       : path.resolve(imagePath);
 
     try {
-      const response = await fetch(`${PYTHON_SERVICE}/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_path: absPath, use_regions: useRegions }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Detection service error');
-      }
-
-      const data = await response.json();
+      const data = await runPythonDetection(absPath);
       return {
         components: data.components || [],
         image: data.image || null,
       };
-
-    } catch (error) {
-      console.warn('Python detection service unavailable, trying CLI detector:', error.message);
-
-      try {
-        const data = await runPythonDetection(absPath);
-        return {
-          components: data.components || [],
-          image: data.image || null,
-        };
-      } catch (cliError) {
-        console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
-        return this.fallbackDetection();
-      }
+    } catch (cliError) {
+      console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
+      return this.fallbackDetection();
     }
   }
 

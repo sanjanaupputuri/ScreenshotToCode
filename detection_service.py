@@ -636,7 +636,22 @@ def estimate_border_and_fill(roi, contour_mask):
     return fill_hex, border_hex, border_width, radius
 
 
-def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width):
+def fill_solidity(roi):
+    """
+    Return the fraction of pixels that are close to the median fill color.
+    High solidity (>0.55) = solid background (real button/panel).
+    Low solidity (<0.35) = text/icons on a different background (not a button).
+    """
+    if roi.size == 0:
+        return 0.0
+    flat = roi.reshape(-1, 3).astype(np.float32)
+    median = np.median(flat, axis=0)
+    dists = np.linalg.norm(flat - median, axis=1)
+    return float(np.mean(dists < 55))
+
+
+def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width,
+               roi=None, page_background=None):
     aspect = w / max(h, 1)
     area_ratio = (w * h) / float(image_w * image_h)
     brightness = float(np.mean(fill_bgr))
@@ -647,24 +662,28 @@ def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width)
         return "avatar" if w >= 24 and h >= 24 else "icon"
     if w >= 160 and 4.0 <= aspect <= 20.0 and 24 <= h <= 72 and (brightness > 238 or (border_width > 0 and brightness > 220)):
         return "input"
-    
-    # Button detection - prioritize over chips
-    # Buttons: wider, colored backgrounds OR borders, reasonable height
+
+    # Compute fill solidity to distinguish solid-bg buttons from text-on-bg regions
+    solidity = fill_solidity(roi) if roi is not None else 1.0
+
+    # A real button must have a solid fill (not just colored text pixels on dark bg)
+    # Low solidity means the region is mostly text/icons, not a solid button background
+    is_solid_fill = solidity >= 0.45
+
+    # Button detection — requires solid fill
     if text_count > 0 and 2.0 <= aspect <= 10.0 and 28 <= h <= 80 and w >= 120:
-        # Strong button indicators: colored background (not neutral) OR border
-        if brightness < 220 or border_width > 0:
+        if (brightness < 220 or border_width > 0) and is_solid_fill:
             return "button"
-    
+
     # Chip detection - smaller, badge-like elements
     if text_count > 0 and w <= 260 and area_ratio < 0.012 and 2.0 <= aspect <= 10.0 and 18 <= h <= 46:
-        # Only classify as chip if it's small and neutral colored
-        if w < 120 or (brightness > 220 and border_width == 0):
+        if (w < 120 or (brightness > 220 and border_width == 0)) and is_solid_fill:
             return "chip"
-    
-    # Fallback button detection for any remaining button-like shapes
-    if 2.0 <= aspect <= 10.0 and 24 <= h <= 80 and (brightness < 230 or border_width > 0):
+
+    # Fallback button detection — only for solid-fill regions
+    if 2.0 <= aspect <= 10.0 and 24 <= h <= 80 and (brightness < 230 or border_width > 0) and is_solid_fill:
         return "button"
-    
+
     if area_ratio > 0.015 and h > 28 and w > 90:
         return "panel"
     return "shape"
@@ -811,6 +830,33 @@ def create_structural_bands(image, text_regions, shape_regions, page_background)
     return synthetic
 
 
+def extract_text_from_region(image, x, y, w, h):
+    """Extract text directly from a specific region using OCR."""
+    roi = crop(image, x, y, w, h)
+    if roi.size == 0:
+        return ""
+
+    # Upscale small regions for better OCR accuracy
+    scale = max(1, min(3, 48 // max(h, 1)))
+    if scale > 1:
+        roi = cv2.resize(roi, (w * scale, h * scale), interpolation=cv2.INTER_CUBIC)
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    inv = cv2.bitwise_not(thresh)
+
+    best = ""
+    for variant in [thresh, inv, roi]:
+        t = pytesseract.image_to_string(variant, config="--psm 7").strip()
+        cleaned = clean_ocr_text(t)
+        stripped = re.sub(r'^[\d\W]+\s*', '', cleaned).strip()
+        candidate = stripped if stripped else cleaned
+        if len(candidate) > len(best):
+            best = candidate
+
+    return best
+
+
 def detect_shape_regions(image, text_regions, page_background):
     height, width = image.shape[:2]
     
@@ -859,6 +905,32 @@ def detect_shape_regions(image, text_regions, page_background):
         fill_bgr = np.array([int(fill_hex[5:7], 16), int(fill_hex[3:5], 16), int(fill_hex[1:3], 16)])
         bg_distance = np.linalg.norm(fill_bgr - page_background)
 
+        # Check if the bounding box corners match the page background.
+        # Only apply for large regions where the fill is close to the page background
+        # (i.e., the contour is outlining text on the page bg, not a solid button).
+        # Skip this check if the fill is clearly different from page background (real button).
+        fill_vs_page_dist = np.linalg.norm(fill_bgr.astype(float) - page_background.astype(float))
+        if (w > 300 or h > 60) and fill_vs_page_dist < 80:
+            corner_strip = max(2, min(5, min(w, h) // 8))
+            corner_pixels = np.concatenate([
+                roi[:corner_strip, :corner_strip].reshape(-1, 3),
+                roi[:corner_strip, w - corner_strip:].reshape(-1, 3),
+                roi[h - corner_strip:, :corner_strip].reshape(-1, 3),
+                roi[h - corner_strip:, w - corner_strip:].reshape(-1, 3),
+            ], axis=0)
+            corner_bgr = np.median(corner_pixels, axis=0)
+            corner_bg_dist = np.linalg.norm(corner_bgr - page_background)
+            if corner_bg_dist < 30:
+                continue
+
+        # If the contour fill color is very different from the bounding box median
+        # AND the bounding box is mostly dark, this is colored text on a dark background.
+        roi_median = np.median(roi.reshape(-1, 3), axis=0)
+        roi_brightness = float(np.mean(roi_median))
+        fill_vs_roi_dist = np.linalg.norm(fill_bgr.astype(float) - roi_median.astype(float))
+        if fill_vs_roi_dist > 60 and roi_brightness < 100:
+            continue
+
         linked_texts = []
         for region in text_regions:
             within = (
@@ -870,9 +942,25 @@ def detect_shape_regions(image, text_regions, page_background):
             if within:
                 linked_texts.append(region)
 
-        # Colored regions are likely buttons
-        element_type = "button"
+        # Only classify as button if the region has a solid fill (not just colored text on dark bg)
+        solidity = fill_solidity(roi)
+        if solidity < 0.45:
+            continue
+
+        element_type = shape_type(x, y, w, h, len(linked_texts), width, height,
+                                  fill_bgr, border_width, roi=roi, page_background=page_background)
+        if element_type not in ("button", "chip", "input"):
+            element_type = "button"
         z_index = 10
+
+        # Extract text directly from the button region (don't rely on global OCR text matching)
+        direct_text = ""
+        if element_type in ("button", "chip"):
+            raw_dt = extract_text_from_region(image, x, y, w, h)
+            words = raw_dt.split()
+            alpha_ratio = sum(c.isalpha() for c in raw_dt) / max(len(raw_dt), 1)
+            if raw_dt and len(words) >= 1 and alpha_ratio >= 0.6 and len(raw_dt) >= 3:
+                direct_text = raw_dt
 
         elements.append({
             "kind": "shape",
@@ -894,6 +982,7 @@ def detect_shape_regions(image, text_regions, page_background):
             "z_index": z_index,
             "linked_text_count": len(linked_texts),
             "nesting_level": 0,
+            "_direct_text": direct_text,
         })
 
     # Process standard edge-detected contours
@@ -928,6 +1017,17 @@ def detect_shape_regions(image, text_regions, page_background):
         fill_bgr = np.array([int(fill_hex[5:7], 16), int(fill_hex[3:5], 16), int(fill_hex[1:3], 16)])
         bg_distance = np.linalg.norm(fill_bgr - page_background)
 
+        # Check if the contour fill color is actually the text/icon color rather than a background.
+        # If the bounding box median (full roi) is much darker than the contour fill,
+        # the contour is outlining text pixels on a dark background — not a solid button.
+        roi_median = np.median(roi.reshape(-1, 3), axis=0)
+        fill_vs_roi_dist = np.linalg.norm(fill_bgr.astype(float) - roi_median.astype(float))
+        # If fill is very different from the overall roi median AND roi is dark, it's text on bg
+        roi_brightness = float(np.mean(roi_median))
+        if fill_vs_roi_dist > 60 and roi_brightness < 100:
+            # The contour fill is a bright/colored text on a dark background — skip
+            continue
+
         linked_texts = []
         for region in text_regions:
             within = (
@@ -942,7 +1042,7 @@ def detect_shape_regions(image, text_regions, page_background):
         if bg_distance < 6 and border_width == 0 and not linked_texts:
             continue
 
-        element_type = shape_type(x, y, w, h, len(linked_texts), width, height, fill_bgr, border_width)
+        element_type = shape_type(x, y, w, h, len(linked_texts), width, height, fill_bgr, border_width, roi=roi, page_background=page_background)
         if element_type == "input" and linked_texts:
             text_content = " ".join(region.get("text", "") for region in sorted(linked_texts, key=lambda item: (item["x"], item["y"]))).strip()
             text_left = min(region["x"] for region in linked_texts)
@@ -978,10 +1078,21 @@ def detect_shape_regions(image, text_regions, page_background):
         elif element_type in ("chip", "button", "input"):
             z_index = 10 + min(depth, 3)
 
+        # Extract text directly from button/chip regions
+        direct_text = ""
+        if element_type in ("button", "chip"):
+            raw_dt = extract_text_from_region(image, x, y, w, h)
+            # Only use direct_text if it looks like real words (not OCR garbage)
+            words = raw_dt.split()
+            alpha_ratio = sum(c.isalpha() for c in raw_dt) / max(len(raw_dt), 1)
+            if raw_dt and len(words) >= 1 and alpha_ratio >= 0.6 and len(raw_dt) >= 3:
+                direct_text = raw_dt
+
         elements.append({
             "kind": "shape",
             "type": element_type,
             "text": "",
+            "_direct_text": direct_text,
             "x": int(x),
             "y": int(y),
             "width": int(w),
@@ -1396,10 +1507,21 @@ def prune_detected_elements(elements):
                 child_texts.setdefault(parent_id, []).append((element.get("text") or "").strip())
 
     kept = []
+    shapes_with_direct_text = set()
+    for element in elements:
+        if element["kind"] == "shape" and element.get("_direct_text"):
+            shapes_with_direct_text.add(element["id"])
+
     for element in elements:
         if element["kind"] == "background":
             kept.append(element)
             continue
+
+        # Skip text elements that are inside a button/chip with _direct_text
+        if element["kind"] == "text":
+            parent_id = element.get("parent_id")
+            if parent_id is not None and parent_id in shapes_with_direct_text:
+                continue
 
         if element["kind"] == "shape":
             combined_text = " ".join(text for text in child_texts.get(element["id"], []) if text).strip()
