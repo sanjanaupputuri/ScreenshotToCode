@@ -28,6 +28,5 @@ Thumbs.db
 
 # Vite
 frontend/.vite/
-*.png
 __pycache__/
 *.pyc
