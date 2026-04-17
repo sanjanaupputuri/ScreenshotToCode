@@ -63,7 +63,6 @@ export class DetectionService {
         components: data.components || [],
         image: data.image || null,
       };
-<<<<<<< HEAD
 
     } catch (error) {
       console.warn('Python detection service unavailable, trying CLI detector:', error.message);
@@ -78,11 +77,6 @@ export class DetectionService {
         console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
         return this.fallbackDetection();
       }
-=======
-    } catch (cliError) {
-      console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
-      return this.fallbackDetection();
->>>>>>> 6db458f193ffb6379c9590126fc1b0ecd9e2cfb6
     }
   }
 

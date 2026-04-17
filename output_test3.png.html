@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background-color: #232235;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: #24292f;
+}
+.viewport {
+  min-height: 100vh;
+  display: block;
+  padding: 16px;
+  overflow: auto;
+  background-color: #232235;
+}
+.canvas {
+  position: relative;
+  width: 1920px;
+  height: 898px;
+  min-width: 1920px;
+  min-height: 898px;
+  margin: 0 auto;
+  overflow: hidden;
+  background-color: #232235;
+}
+.screen-text {
+  overflow: visible;
+}
+.screen-shape {
+  overflow: hidden;
+}
+input::placeholder {
+  color: inherit;
+  opacity: 1;
+}</style>
+</head>
+<body>
+  <main class="viewport">
+    <section class="canvas" aria-label="Generated reconstruction">
+    <div class="screen-bg" style="position:absolute;inset:0;background:#433e56;z-index:1"></div>
+    <div class="screen-shape screen-toolbar"  style="position:absolute;left:0px;top:127px;width:1920px;height:387px;background:#221e34;border:none;border-bottom:1px solid #d0d7de;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:765px;width:1920px;height:50px;background:#232235;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-panel"  style="position:absolute;left:0px;top:826px;width:1920px;height:72px;background:#232235;border:none;border-radius:0px;overflow:visible;z-index:4" data-parent-id="" data-row-id=""></div>
+    <div class="screen-shape screen-shape"  style="position:absolute;left:1903px;top:83px;width:12px;height:800px;background:#fcfcfc;border:none;border-radius:5px;overflow:visible;z-index:6" data-parent-id="" data-row-id="0"></div>
+    <button type="button" style="position:absolute;left:829px;top:535px;width:242px;height:69px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:22px;font-weight:600;line-height:1.18;text-align:center;background:#f0351f;border:4px solid #362448;border-radius:27px;z-index:6;overflow:hidden">Sign up for free</button>
+    <button type="button" style="position:absolute;left:1729px;top:21px;width:113px;height:56px;display:flex;align-items:center;justify-content:center;padding:0 8%;color:#111827;font-size:19px;font-weight:600;line-height:1.18;text-align:center;background:#f03621;border:4px solid #181825;border-radius:22px;z-index:8;overflow:hidden">Efe Tant</button>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:701px;top:242px;width:43px;height:54px;background:#ffffff;border:none;border-radius:54px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:257px;top:243px;width:44px;height:47px;background:#ffffff;border:none;border-radius:47px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:371px;top:243px;width:43px;height:53px;background:#ffffff;border:none;border-radius:53px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:1242px;top:243px;width:43px;height:47px;background:#ffffff;border:none;border-radius:47px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:635px;top:244px;width:56px;height:52px;background:#ffffff;border:none;border-radius:56px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-avatar"  style="position:absolute;left:541px;top:245px;width:38px;height:44px;background:#2e223c;border:3px solid #ffffff;border-radius:44px;overflow:hidden;z-index:15" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-shape screen-shape"  style="position:absolute;left:312px;top:221px;width:50px;height:74px;background:#ffffff;border:none;border-radius:6px;overflow:hidden;z-index:16" data-parent-id="" data-row-id="0"></div>
+    <div class="screen-text" style="position:absolute;left:111px;top:22px;width:1711px;min-height:49px;color:#f76f55;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">Superlist Features Use Cases Updates Pricing Blog Download Signin up</div>
+    <div class="screen-text" style="position:absolute;left:1336px;top:213px;width:320px;min-height:104px;color:#ff4a36;font-size:73px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">Finally</div>
+    <div class="screen-text" style="position:absolute;left:665px;top:451px;width:216px;min-height:23px;color:#e7e6ea;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">The list app for</div>
+    <div class="screen-text" style="position:absolute;left:954px;top:452px;width:283px;min-height:22px;color:#cbc8d2;font-size:17px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">priorities, and notes all in</div>
+    <div class="screen-text" style="position:absolute;left:660px;top:483px;width:514px;min-height:23px;color:#e9e7eb;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">one beautiful workspace youll actually enjoy</div>
+    <div class="screen-text" style="position:absolute;left:560px;top:776px;width:112px;min-height:28px;color:#ffffff;font-size:18px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">cre Pera a</div>
+    <div class="screen-text" style="position:absolute;left:700px;top:782px;width:479px;min-height:16px;color:#8c8aa1;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">mcs Plan Share we</div>
+    <div class="screen-text" style="position:absolute;left:216px;top:810px;width:41px;min-height:13px;color:#57606a;font-size:11px;font-weight:400;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">Inbox</div>
+    <div class="screen-text" style="position:absolute;left:216px;top:846px;width:819px;min-height:51px;color:#f8f9fb;font-size:35px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">Today on Production planning</div>
+    <div class="screen-text" style="position:absolute;left:1080px;top:849px;width:109px;min-height:36px;color:#f8f9fa;font-size:30px;font-weight:700;line-height:1.18;text-align:left;white-space:pre-wrap;word-break:break-word;overflow:hidden;background:transparent;border:none;z-index:100" data-parent-id="" data-row-id="0">June</div>
+    </section>
+  </main>
+</body>
+</html>
