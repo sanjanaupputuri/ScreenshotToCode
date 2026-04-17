@@ -58,23 +58,12 @@ export class DetectionService {
       : path.resolve(imagePath);
 
     try {
-      const response = await fetch(`${PYTHON_SERVICE}/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_path: absPath, use_regions: useRegions }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Detection service error');
-      }
-
-      const data = await response.json();
+      const data = await runPythonDetection(absPath);
       return {
         components: data.components || [],
         image: data.image || null,
       };
+<<<<<<< HEAD
 
     } catch (error) {
       console.warn('Python detection service unavailable, trying CLI detector:', error.message);
@@ -89,6 +78,11 @@ export class DetectionService {
         console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
         return this.fallbackDetection();
       }
+=======
+    } catch (cliError) {
+      console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
+      return this.fallbackDetection();
+>>>>>>> 6db458f193ffb6379c9590126fc1b0ecd9e2cfb6
     }
   }
 
