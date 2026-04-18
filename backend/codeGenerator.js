@@ -60,7 +60,7 @@ export async function generateCode(imagePath, metadata = {}) {
   console.log(`${requestLabel}STAGE 3: GENERATING BASE HTML/CSS (ComponentService)`);
   console.log('='.repeat(60));
 
-  const baseHTML = ComponentService.generateHTML(processed);
+  const baseHTML = ComponentService.generateFlexHTML(processed);
   console.log(`${requestLabel}Base HTML: ${baseHTML.length} chars`);
 
   console.log('\n' + '='.repeat(60));

@@ -297,10 +297,10 @@ def estimate_page_background(image):
 
 
 def normalize_component(component, image_w, image_h):
-    component["x_pct"] = round(component["x"] / image_w, 6)
-    component["y_pct"] = round(component["y"] / image_h, 6)
-    component["w_pct"] = round(component["width"] / image_w, 6)
-    component["h_pct"] = round(component["height"] / image_h, 6)
+    component["x_pct"] = component["x"] / image_w
+    component["y_pct"] = component["y"] / image_h
+    component["w_pct"] = component["width"] / image_w
+    component["h_pct"] = component["height"] / image_h
     return component
 
 
@@ -492,7 +492,7 @@ def detect_text_regions(image):
                 "border_width": 0,
                 "border_radius": 0,
                 "text_color": text_color,
-                "font_size": int(max(11, round(h * 0.82))),
+                "font_size": int(max(11, round(h * 0.72))),
                 "font_weight": 700 if h >= 24 else 600 if h >= 18 else 400,
                 "text_align": "left",
                 "z_index": 20,
@@ -1959,15 +1959,17 @@ def detect_with_regions(image_path):
                 el["x"] = int(el["x"] + rx)
                 el["y"] = int(el["y"] + ry)
                 
-                # Clamp to image boundaries
-                el["x"] = max(0, min(el["x"], w - el["width"]))
-                el["y"] = max(0, min(el["y"], h - el["height"]))
+                # Clamp to image boundaries (use image dims, not element dims, as reference)
+                el["x"] = max(0, min(el["x"], w - 1))
+                el["y"] = max(0, min(el["y"], h - 1))
+                el["width"] = max(1, min(el["width"], w - el["x"]))
+                el["height"] = max(1, min(el["height"], h - el["y"]))
                 
-                # Recalculate percentages for full image
-                el["x_pct"] = round(el["x"] / w, 6)
-                el["y_pct"] = round(el["y"] / h, 6)
-                el["w_pct"] = round(el["width"] / w, 6)
-                el["h_pct"] = round(el["height"] / h, 6)
+                # Recalculate percentages for full image (no premature rounding)
+                el["x_pct"] = el["x"] / w
+                el["y_pct"] = el["y"] / h
+                el["w_pct"] = el["width"] / w
+                el["h_pct"] = el["height"] / h
                 
                 all_elements.append(el)
     

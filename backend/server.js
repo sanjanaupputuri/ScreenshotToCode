@@ -8,6 +8,7 @@ import { readFile } from 'fs/promises';
 import { initializeDatabase, saveGeneratedCode, getUserHistory, saveUser } from './database.js';
 import { generateCode } from './codeGenerator.js';
 import { verifyToken } from './auth.js';
+import { auditLayout } from './auditService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -121,6 +122,19 @@ app.get('/api/status', async (req, res) => {
   } catch { /* offline */ }
 
   res.json({ python_service: pythonUp, ollama: ollamaUp });
+});
+
+// POST /api/audit — analyse detected elements and generated HTML for layout issues
+app.post('/api/audit', async (req, res) => {
+  try {
+    const { elements, html, image } = req.body;
+    if (!elements || !html) return res.status(400).json({ error: 'elements and html are required' });
+    const report = auditLayout(elements, html, image || {});
+    res.json(report);
+  } catch (error) {
+    console.error('Audit error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));

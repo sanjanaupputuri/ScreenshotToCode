@@ -77,6 +77,61 @@ function normalizeInlineText(value = '') {
   return String(value).replace(/\s+/g, ' ').trim();
 }
 
+
+function detectShape(width, height, borderRadius) {
+  const aspect = width / Math.max(height, 1);
+  if (Math.abs(aspect - 1) < 0.15 && borderRadius >= Math.min(width, height) * 0.4) return 'circle';
+  if (aspect > 6 && height <= 6) return 'line';
+  if (borderRadius >= 8) return 'rounded-rectangle';
+  if (Math.abs(aspect - 1) < 0.25 && width <= 48) return 'icon';
+  return 'rectangle';
+}
+
+function detectRole(element, allElements) {
+  const { semanticType, background, border, width, height, text, fontSize, fontWeight } = element;
+  if (semanticType !== 'button' && semanticType !== 'chip') return 'normal';
+
+  // Primary: dark/coloured background, large, prominent
+  if (!isTransparent(background)) {
+    const rgb = hexToRgb(background);
+    if (rgb) {
+      const lum = relativeLuminance(background);
+      // Saturated colour (not grey) = primary
+      const maxC = Math.max(rgb.r, rgb.g, rgb.b);
+      const minC = Math.min(rgb.r, rgb.g, rgb.b);
+      if (maxC - minC > 40) return 'primary';
+      // Dark solid fill = primary
+      if (lum < 0.25) return 'primary';
+    }
+  }
+  // Secondary: border only, transparent/white bg
+  if (border !== 'none' && (isTransparent(background) || background === '#ffffff' || background === '#f6f8fa')) {
+    return 'secondary';
+  }
+  return 'normal';
+}
+
+function classifySemanticType(element) {
+  const { kind, semanticType, width, height, text, background, border, borderRadius } = element;
+  if (kind === 'background') return semanticType;
+  if (kind === 'text') {
+    // Upgrade text role based on font size
+    if (element.fontSize >= 20 || element.fontWeight >= 700) return 'heading';
+    if (element.fontSize <= 12) return 'caption';
+    return semanticType;
+  }
+  // Already classified by Python — trust it, but fix 'shape' unknowns
+  if (semanticType !== 'shape') return semanticType;
+
+  const aspect = width / Math.max(height, 1);
+  const area = width * height;
+  if (area > 40000) return 'panel';
+  if (aspect > 5 && height <= 6) return 'divider';
+  if (Math.abs(aspect - 1) < 0.25 && width <= 48) return 'icon';
+  if (text && aspect >= 2 && height >= 24 && height <= 80) return 'button';
+  return 'container';
+}
+
 function normalizeElement(raw, index) {
   const kind = raw.kind || 'shape';
   const semanticType = raw.semantic_type || raw.type || kind;
@@ -149,6 +204,8 @@ function normalizeElement(raw, index) {
     parentType: raw.parent_type ?? null,
     rowId: raw.row_id ?? null,
     layoutHint: raw.layout_hint || null,
+    shape: detectShape(Number(raw.width) || 1, Number(raw.height) || 1, Number(raw.border_radius) || 0),
+    role: 'normal',  // filled in by enrichElementRoles after all elements are normalized
   };
 }
 
@@ -461,15 +518,16 @@ function renderDetachedChildren(children, childrenByParent, frame = null, pageBg
   }).join('');
 }
 
-function renderInputControl(element, textValue) {
-  const padX = Math.max(10, Math.round(element.height * 0.25));
-  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width - (padX * 2), element.height * 0.7, element.fontWeight || 400, 10);
+function renderInputControl(element, textValue, frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
+  const padX = Math.max(10, Math.round(metrics.height * 0.25));
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, metrics.width - (padX * 2), metrics.height * 0.7, element.fontWeight || 400, 10);
   return `<input type="text" value="" placeholder="${escapeHtml(textValue)}" readonly style="${styleString({
     position: 'absolute',
-    left: px(element.x),
-    top: px(element.y),
-    width: px(element.width),
-    height: px(element.height),
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
     padding: `0 ${px(padX)}`,
     color: element.textColor,
     'font-size': px(fontSize),
@@ -483,14 +541,15 @@ function renderInputControl(element, textValue) {
   })}" />`;
 }
 
-function renderInlineControl(element, textValue, tagName = 'button') {
-  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.82, element.height * 0.72, element.fontWeight || 600, 10);
+function renderInlineControl(element, textValue, tagName = 'button', frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, metrics.width * 0.82, metrics.height * 0.72, element.fontWeight || 600, 10);
   return `<${tagName} ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
     position: 'absolute',
-    left: px(element.x),
-    top: px(element.y),
-    width: px(element.width),
-    height: px(element.height),
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
     display: 'flex',
     'align-items': 'center',
     'justify-content': 'center',
@@ -505,6 +564,7 @@ function renderInlineControl(element, textValue, tagName = 'button') {
     'border-radius': px(element.borderRadius),
     'z-index': element.zIndex,
     overflow: 'hidden',
+    'box-shadow': element.role === 'primary' ? '0 1px 3px rgba(0,0,0,0.2)' : undefined,
   })}">${escapeHtml(textValue)}</${tagName}>`;
 }
 
@@ -534,7 +594,7 @@ function renderShape(element, content, frame = null, tagName = 'div') {
     overflow,
     'z-index': element.zIndex,
     isolation: hasChildren ? 'isolate' : undefined,
-  })}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${content || ''}</${tagName}>`;
+  })}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}" data-role="${element.role || 'normal'}" data-shape="${element.shape || 'rectangle'}">${content || ''}</${tagName}>`;
 }
 
 function renderText(element, frame = null, pageBg = null) {
@@ -688,7 +748,7 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     const finalTextColor = (!isTransparent(bg) && (contrastRatio(textColor, bg) < 1.5 || colorDistance(textColor, bg) < 30))
       ? bestContrastText(bg)
       : textColor;
-    return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
+    return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div', frame);
   }
 
   // Button with no text children — use direct_text from detection, then nearest orphan
@@ -710,18 +770,133 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     }
     const fontSize = Math.max(11, Math.round(element.height * 0.34));
     const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;
-    return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
+    return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div', frame);
   }
 
   if (element.semanticType === 'input' && inlineText) {
     const textColor = inlineTextNode?.textColor || '#6b7280';
     const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.3));
     const fontWeight = inlineTextNode?.fontWeight || 400;
-    return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText);
+    return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText, frame);
   }
 
   const content = children.map((child) => renderNode(child, childrenByParent, element, pageBg, allElements)).join('');
   return renderShape(element, content, frame);
+}
+
+
+/**
+ * Post-detection coordinate correction pass.
+ * Snaps elements to consistent rows/columns, removes overlaps, normalises spacing.
+ */
+function correctCoordinates(elements, imageWidth, imageHeight) {
+  const nonBg = elements.filter(e => e.kind !== 'background');
+
+  // ── 1. Boundary clamp ────────────────────────────────────────────────────
+  for (const el of nonBg) {
+    el.x = Math.max(0, Math.min(el.x, imageWidth - 1));
+    el.y = Math.max(0, Math.min(el.y, imageHeight - 1));
+    el.width  = Math.max(1, Math.min(el.width,  imageWidth  - el.x));
+    el.height = Math.max(1, Math.min(el.height, imageHeight - el.y));
+  }
+
+  // ── 2. Row snapping — align elements whose centres are within 6 px ───────
+  const rows = [];
+  for (const el of [...nonBg].sort((a, b) => a.y - b.y)) {
+    const cy = el.y + el.height / 2;
+    const row = rows.find(r => Math.abs(cy - r.cy) <= Math.max(6, el.height * 0.35));
+    if (row) {
+      row.items.push(el);
+      row.cy = row.items.reduce((s, e) => s + e.y + e.height / 2, 0) / row.items.length;
+    } else {
+      rows.push({ cy, items: [el] });
+    }
+  }
+  for (const row of rows) {
+    if (row.items.length < 2) continue;
+    // Only snap text/inline elements — leave large shapes alone
+    const snapTargets = row.items.filter(e => e.kind === 'text' || e.height < 60);
+    if (snapTargets.length < 2) continue;
+    const medianY = snapTargets.map(e => e.y).sort((a, b) => a - b)[Math.floor(snapTargets.length / 2)];
+    for (const el of snapTargets) {
+      if (Math.abs(el.y - medianY) <= 6) el.y = medianY;
+    }
+  }
+
+  // ── 3. Column snapping — align left edges within 6 px of each other ──────
+  const cols = [];
+  for (const el of [...nonBg].sort((a, b) => a.x - b.x)) {
+    const col = cols.find(c => Math.abs(el.x - c.x) <= 6);
+    if (col) { col.items.push(el); col.x = col.items.reduce((s, e) => s + e.x, 0) / col.items.length; }
+    else cols.push({ x: el.x, items: [el] });
+  }
+  for (const col of cols) {
+    if (col.items.length < 3) continue; // only snap if 3+ elements share a column
+    const snapX = Math.round(col.x);
+    for (const el of col.items) {
+      if (Math.abs(el.x - snapX) <= 6) el.x = snapX;
+    }
+  }
+
+  // ── 4. Overlap resolution — push overlapping siblings apart (same parent) ─
+  const byParent = new Map();
+  for (const el of nonBg) {
+    const key = el.parentId ?? '__root__';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(el);
+  }
+  for (const siblings of byParent.values()) {
+    const sorted = [...siblings].sort((a, b) => a.y - b.y || a.x - b.x);
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1], cur = sorted[i];
+      if (prev.kind === 'background' || cur.kind === 'background') continue;
+      const overlapY = (prev.y + prev.height) - cur.y;
+      const overlapX = (prev.x + prev.width) - cur.x;
+      // Only fix small overlaps (< 8 px) — large overlaps are intentional nesting
+      if (overlapY > 0 && overlapY < 8 && Math.abs(cur.x - prev.x) < Math.min(prev.width, cur.width) * 0.8) {
+        cur.y = prev.y + prev.height + 2;
+      }
+      if (overlapX > 0 && overlapX < 8 && Math.abs(cur.y - prev.y) < Math.min(prev.height, cur.height) * 0.8) {
+        cur.x = prev.x + prev.width + 2;
+      }
+    }
+  }
+
+  // ── 5. Spacing normalisation — equalise gaps between same-row siblings ────
+  for (const row of rows) {
+    const sameParent = new Map();
+    for (const el of row.items) {
+      const key = el.parentId ?? '__root__';
+      if (!sameParent.has(key)) sameParent.set(key, []);
+      sameParent.get(key).push(el);
+    }
+    for (const group of sameParent.values()) {
+      if (group.length < 3) continue;
+      const sorted = [...group].sort((a, b) => a.x - b.x);
+      const gaps = [];
+      for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i].x - (sorted[i-1].x + sorted[i-1].width));
+      const medianGap = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+      if (medianGap < 0) continue;
+      // Only normalise if gaps are close (within 8 px of median)
+      const allClose = gaps.every(g => Math.abs(g - medianGap) <= 8);
+      if (!allClose) continue;
+      let cursor = sorted[0].x + sorted[0].width;
+      for (let i = 1; i < sorted.length; i++) {
+        sorted[i].x = cursor + medianGap;
+        cursor = sorted[i].x + sorted[i].width;
+      }
+    }
+  }
+
+  // ── 6. Re-clamp after adjustments ────────────────────────────────────────
+  for (const el of nonBg) {
+    el.x = Math.max(0, Math.min(el.x, imageWidth - 1));
+    el.y = Math.max(0, Math.min(el.y, imageHeight - 1));
+    el.width  = Math.max(1, Math.min(el.width,  imageWidth  - el.x));
+    el.height = Math.max(1, Math.min(el.height, imageHeight - el.y));
+  }
+
+  return elements;
 }
 
 export class ComponentService {
@@ -734,7 +909,13 @@ export class ComponentService {
     const normalized = enriched
       .map((element, index) => normalizeElement(element, index))
       .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y) || (a.x - b.x));
+    // Enrich: refine semanticType, assign role, using full element list for context
+    for (const el of normalized) {
+      el.semanticType = classifySemanticType(el);
+      el.role = detectRole(el, normalized);
+    }
     applyParentAnchoring(normalized, image);
+    correctCoordinates(normalized, Number(image.width) || 1440, Number(image.height) || 900);
 
     return {
       image: {
@@ -813,6 +994,92 @@ export class ComponentService {
 </body>
 </html>`;
   }
+
+  static generateFlexHTML(processed) {
+    const image = processed.image;
+    const elements = processed.elements || [];
+    const bodyBg = image.backgroundColor || '#f6f8fa';
+    const hierarchy = buildHierarchy(elements);
+
+    // Group root elements into rows by y-proximity
+    const rows = [];
+    for (const el of hierarchy.roots.filter(e => e.kind !== 'background')) {
+      const midY = el.y + el.height / 2;
+      let placed = false;
+      for (const row of rows) {
+        if (Math.abs(midY - row.midY) <= Math.max(20, row.maxHeight * 0.8, el.height * 0.8)) {
+          row.elements.push(el);
+          row.midY = row.elements.reduce((sum, e) => sum + e.y + e.height / 2, 0) / row.elements.length;
+          row.maxHeight = Math.max(row.maxHeight, el.height);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) rows.push({ midY, maxHeight: el.height, elements: [el] });
+    }
+
+    rows.sort((a, b) => a.midY - b.midY);
+    rows.forEach(row => row.elements.sort((a, b) => a.x - b.x));
+
+    const sections = rows.map(row => {
+      const els = row.elements;
+      if (els.length === 1 && els[0].semanticType === 'toolbar' && els[0].width > image.width * 0.8) {
+        return renderFlexSection(els[0], hierarchy.childrenByParent, 'header', bodyBg, elements);
+      }
+      if (els.length === 1 && els[0].semanticType === 'panel' && els[0].width > image.width * 0.6) {
+        return renderFlexSection(els[0], hierarchy.childrenByParent, 'section', bodyBg, elements);
+      }
+      return `<div class="flex-row">${els.map(el => renderFlexElement(el, hierarchy.childrenByParent, bodyBg, elements)).join('')}</div>`;
+    }).join('\n');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: ${bodyBg}; color: #24292f; line-height: 1.5; }
+    header, section { padding: 12px 16px; }
+    .flex-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+    button, input { font: inherit; }
+    button { cursor: pointer; border: none; padding: 8px 16px; border-radius: 6px; }
+    input { padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; }
+  </style>
+</head>
+<body>
+${sections}
+</body>
+</html>`;
+  }
 }
+
+function renderFlexSection(element, childrenByParent, tag, pageBg, allElements) {
+  const children = childrenByParent.get(element.sourceId) || [];
+  const content = children.map(child => renderFlexElement(child, childrenByParent, pageBg, allElements)).join('');
+  const style = `background:${element.background};${element.border !== 'none' ? `border:${element.border};` : ''}`;
+  return `<${tag} style="${style}">${content}</${tag}>`;
+}
+
+function renderFlexElement(element, childrenByParent, pageBg, allElements) {
+  if (element.kind === 'text') {
+    return `<span style="color:${element.textColor};font-size:${element.fontSize}px;font-weight:${element.fontWeight}">${escapeHtml(element.text)}</span>`;
+  }
+  const children = childrenByParent.get(element.sourceId) || [];
+  const inlineText = selectInlineText(children, element.semanticType).text;
+  if (element.semanticType === 'button' || element.semanticType === 'chip') {
+    const label = inlineText || element.text || '';
+    const bg = element.background;
+    const color = isTransparent(bg) ? '#24292f' : bestContrastText(bg);
+    return `<button style="background:${bg};color:${color};border-radius:${element.borderRadius}px">${escapeHtml(label)}</button>`;
+  }
+  if (element.semanticType === 'input') {
+    return `<input type="text" placeholder="${escapeHtml(inlineText || '')}" style="background:${element.background};border:${element.border};border-radius:${element.borderRadius}px" />`;
+  }
+  const content = children.map(child => renderFlexElement(child, childrenByParent, pageBg, allElements)).join('');
+  return `<div style="background:${element.background};padding:8px;border-radius:${element.borderRadius}px">${content}</div>`;
+}
+
 
 export default ComponentService;
