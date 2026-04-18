@@ -299,15 +299,15 @@ function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Inf
   };
 }
 
-function fitTextSize(text, preferredSize, maxWidth, maxHeight, fontWeight = 400, minSize = 9) {
+function fitTextSize(text, preferredSize, maxWidth, maxHeight, fontWeight = 400, minSize = 8) {
   let size = Math.max(minSize, Math.round(preferredSize || 14));
   const targetWidth = Math.max(8, maxWidth || 8);
   const targetHeight = Math.max(size, maxHeight || size);
 
   while (size > minSize) {
     const metrics = textMetricsForEstimate(text, size, fontWeight, targetWidth);
-    const lineHeight = size * 1.18;
-    if (metrics.widestLine <= targetWidth + 0.5 && (metrics.lineCount * lineHeight) <= targetHeight + 0.5) {
+    const lineHeight = size * 1.2;
+    if (metrics.widestLine <= targetWidth + 1 && (metrics.lineCount * lineHeight) <= targetHeight + 2) {
       return size;
     }
     size -= 1;
@@ -448,7 +448,7 @@ function selectInlineText(children = [], semanticType = 'shape') {
   return { text: best.text, node: best.node };
 }
 
-function renderDetachedChildren(children, childrenByParent, frame = null, pageBg = null) {
+function renderDetachedChildren(children, childrenByParent, frame = null, pageBg = null, allElements = []) {
   return children.map((child) => {
     if (child.kind === 'text') {
       return renderText({
@@ -457,7 +457,7 @@ function renderDetachedChildren(children, childrenByParent, frame = null, pageBg
         textAlign: child.textAlign === 'center' ? 'left' : child.textAlign,
       }, frame, pageBg);
     }
-    return renderNode(child, childrenByParent, frame, pageBg);
+    return renderNode(child, childrenByParent, frame, pageBg, allElements);
   }).join('');
 }
 
@@ -484,7 +484,7 @@ function renderInputControl(element, textValue) {
 }
 
 function renderInlineControl(element, textValue, tagName = 'button') {
-  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.82, element.height * 0.72, element.fontWeight || 600, 10);
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.88, element.height * 0.8, element.fontWeight || 600, 9);
   return `<${tagName} ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
     position: 'absolute',
     left: px(element.x),
@@ -494,11 +494,11 @@ function renderInlineControl(element, textValue, tagName = 'button') {
     display: 'flex',
     'align-items': 'center',
     'justify-content': 'center',
-    padding: '0 8%',
+    padding: '0 6%',
     color: element.textColor,
     'font-size': px(fontSize),
     'font-weight': element.fontWeight,
-    'line-height': '1.18',
+    'line-height': '1.2',
     'text-align': 'center',
     background: element.background,
     border: element.border,
@@ -556,14 +556,16 @@ function renderText(element, frame = null, pageBg = null) {
     top: px(metrics.top),
     width: px(metrics.width),
     'min-height': px(metrics.height),
+    'max-height': px(metrics.height * 1.5),
     color: textColor,
     'font-size': px(fittedFontSize),
     'font-weight': element.fontWeight,
-    'line-height': '1.18',
+    'line-height': '1.2',
     'text-align': element.textAlign,
     'white-space': 'pre-wrap',
-    'word-break': 'break-word',
-    overflow: 'hidden',
+    'word-wrap': 'break-word',
+    'overflow-wrap': 'break-word',
+    overflow: 'visible',
     background: 'transparent',
     border: 'none',
     'z-index': localZIndex,
@@ -651,6 +653,16 @@ function findNearestText(element, allElements) {
 
 function renderNode(element, childrenByParent, frame = null, pageBg = null, allElements = []) {
   if (element.kind === 'background') return renderBackground(element);
+  
+  // Skip text elements that are already inlined in their parent button/chip/input
+  // These are rendered via renderInlineControl, not as separate text nodes
+  if (element.kind === 'text' && element.layoutHint === 'fill-center') {
+    return '';
+  }
+  if (element.kind === 'text' && element.layoutHint === 'input-inline') {
+    return '';
+  }
+  
   if (element.kind === 'text') return renderText(element, frame, pageBg);
 
   const children = childrenByParent.get(element.sourceId) || [];
@@ -665,6 +677,8 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
       && element.border === 'none';
     if (isTransparentShape) return '';
     if (element.semanticType === 'input' && element.width < 100) return '';
+    // Skip empty chips - they're likely false positives
+    if (element.semanticType === 'chip' && !element.text) return '';
   }
 
   if (
@@ -672,11 +686,11 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     inlineText &&
     (!CHIP_BADGE_PATTERN.test(inlineText.trim()) || inlineText.split(/\s+/).length > 2 || element.width > 120)
   ) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
   }
 
   if (element.semanticType === 'input' && inlineText && !INPUT_LABEL_PATTERN.test(inlineText)) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
   }
 
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
@@ -707,6 +721,10 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
           if (dist < Math.max(element.width, element.height) * 0.6) label = nearest.text;
         }
       }
+    }
+    // Skip empty buttons/chips - they're likely false positives
+    if (!label || label.trim().length === 0) {
+      return '';
     }
     const fontSize = Math.max(11, Math.round(element.height * 0.34));
     const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;

@@ -64,7 +64,7 @@ export async function generateCode(imagePath, metadata = {}) {
   console.log(`${requestLabel}Base HTML: ${baseHTML.length} chars`);
 
   console.log('\n' + '='.repeat(60));
-  console.log(`${requestLabel}STAGE 4: OLLAMA VISUAL REFINEMENT`);
+  console.log(`${requestLabel}STAGE 4: OLLAMA ENRICHMENT (40% — CSS + semantic markup)`);
   console.log('='.repeat(60));
 
   // Ollama refines the base HTML — improves visual accuracy without changing coordinates

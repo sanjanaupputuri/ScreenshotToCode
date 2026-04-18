@@ -13,6 +13,7 @@ build/
 # Uploads
 backend/uploads/*
 !backend/uploads/.gitkeep
+*.png
 
 # Database
 backend/database.sqlite

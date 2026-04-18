@@ -108,6 +108,7 @@ export async function initializeDatabase() {
         max_value REAL,
         text_condition TEXT,
         color_condition TEXT,
+        UNIQUE(component_id, rule_type, min_value, max_value),
         FOREIGN KEY (component_id) REFERENCES components(id)
       );
 
@@ -245,7 +246,7 @@ async function populateInitialData() {
       const compId = (await get('SELECT id FROM components WHERE name = ?', [compNames[idx - 1]]))?.id;
       if (compId) {
         await run(
-          'INSERT INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR IGNORE INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)',
           [compId, ruleType, min, max, textCond, colorCond],
         );
       }
