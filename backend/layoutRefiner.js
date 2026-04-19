@@ -109,8 +109,27 @@ function esc(text) {
   return String(text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Determine readable text color on a background
+function contrastColor(bg) {
+  if (!bg || bg === 'transparent') return '#1f2328';
+  const hex = bg.replace('#','');
+  if (hex.length < 6) return '#1f2328';
+  const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+  return (r*0.299 + g*0.587 + b*0.114) > 128 ? '#1f2328' : '#ffffff';
+}
+
+// OCR garbage filter — remove known bad tokens
+const OCR_GARBAGE = /^(Type\(|mae$|smee$|vour$|\[\d|\d\]|[^a-z0-9\s]{3,})/i;
+function isGarbage(text) {
+  if (!text) return true;
+  if (OCR_GARBAGE.test(text.trim())) return true;
+  // Drop if >40% non-alpha chars (OCR noise)
+  const alpha = (text.match(/[a-zA-Z]/g)||[]).length;
+  return alpha / Math.max(text.length,1) < 0.4;
+}
+
 function buildSemanticFromZones(zones, pageKind, image) {
-  if (!zones?.zones?.length) return null; // fallback to base HTML
+  if (!zones?.zones?.length) return null;
 
   const palette = zones.palette || {};
   const bg = palette.background || '#ffffff';
@@ -122,6 +141,11 @@ function buildSemanticFromZones(zones, pageKind, image) {
 
   const zoneMap = {};
   for (const z of zones.zones) zoneMap[z.zone] = z;
+
+  // Filter garbage from all zone elements
+  for (const z of Object.values(zoneMap)) {
+    z.elements = (z.elements || []).filter(e => !isGarbage(e.text));
+  }
 
   const navbar = zoneMap['navbar'];
   const hero = zoneMap['hero'];
@@ -145,7 +169,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   </div>
   <div style="display:flex;align-items:center;gap:0.5rem;">
     ${navActions.map(e => `<a href="#" style="color:${e.color||navTextColor};font-size:${Math.min(e.font_size||14,15)}px;font-weight:${e.font_weight||500};padding:6px 12px;text-decoration:none;white-space:nowrap;">${esc(e.text)}</a>`).join('')}
-    ${navButtons.map(e => `<button style="background:${e.bg||accent};color:${e.color||'#fff'};border:none;border-radius:${e.border_radius||8}px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+    ${navButtons.map(e => `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||8}px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </nav>`;
 
@@ -162,7 +186,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   ${headings.map(e => `<h1 style="color:${e.color};font-size:clamp(2.5rem,6vw,${e.font_size}px);font-weight:${e.font_weight||800};line-height:1.1;letter-spacing:-0.02em;margin:0;">${esc(e.text)}</h1>`).join('')}
   ${subheadings.map(e => `<h2 style="color:${e.color};font-size:clamp(1.1rem,2.5vw,${e.font_size}px);font-weight:${e.font_weight||600};line-height:1.3;margin:0;max-width:700px;">${esc(e.text)}</h2>`).join('')}
   ${bodyEls.map(e => `<p style="color:${e.color};font-size:${e.font_size||16}px;font-weight:${e.font_weight||400};line-height:1.6;margin:0;max-width:600px;">${esc(e.text)}</p>`).join('')}
-  ${heroBtns.length ? `<div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:0.5rem;">${heroBtns.map(e => `<button style="background:${e.bg||accent};color:${e.color||'#fff'};border:none;border-radius:${e.border_radius||50}px;padding:14px 32px;font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}</div>` : ''}
+  ${heroBtns.length ? `<div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:0.5rem;">${heroBtns.map(e => `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||50}px;padding:14px 32px;font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}</div>` : ''}
 </section>`;
   }
 
@@ -175,7 +199,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const sideEls = content.elements.filter(e => (e.x_pct || 0) >= midX);
 
     const renderEl = (e) => {
-      if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${e.color||'#fff'};border:none;border-radius:${e.border_radius||6}px;padding:6px 16px;font-size:${e.font_size||13}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
+      if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:6px 16px;font-size:${e.font_size||13}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
       if (e.role === 'input') return `<input placeholder="${esc(e.text||'')}" style="background:${e.bg||'#fff'};border:1px solid ${e.border||'#d0d7de'};border-radius:6px;padding:5px 10px;font-size:13px;outline:none;" />`;
       if (e.role === 'section-title') return `<h3 style="color:${e.color};font-size:${e.font_size||16}px;font-weight:${e.font_weight||700};margin:0;">${esc(e.text)}</h3>`;
       return `<span style="color:${e.color};font-size:${e.font_size||14}px;font-weight:${e.font_weight||400};">${esc(e.text)}</span>`;
@@ -294,15 +318,56 @@ export class LayoutRefiner {
     }
   }
 
-  // Stage 3: Build semantic HTML from zones (Node.js), then Ollama adds CSS polish
-  static async refineHTML(baseHTML, detectedElements, image, pageKind = 'generic', zones = null) {
-    // Build semantic HTML from zone data in Node.js (no AI needed for structure)
+  // Stage 3: Build semantic HTML from zones (Node.js), then use vision model if available
+  static async refineHTML(baseHTML, detectedElements, image, pageKind = 'generic', zones = null, imagePath = null) {
     const semanticHTML = zones?.zones?.length ? buildSemanticFromZones(zones, pageKind, image) : null;
     const workingHTML = semanticHTML || baseHTML;
 
-    // Ollama adds CSS polish only (fast, <200 tokens)
-    const cssPrompt = `Return ONLY JSON {"extra_css":"..."} with CSS for a ${pageKind} page: button hover effects, link hover, input focus, smooth transitions. Keep it minimal.`;
+    // Try vision model (moondream) if image path provided
+    if (imagePath) {
+      try {
+        const { readFileSync } = await import('fs');
+        const imageData = readFileSync(imagePath).toString('base64');
 
+        // Check if moondream is available
+        const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+        const tags = await tagsRes.json();
+        const hasVision = tags.models?.some(m => m.name?.includes('moondream'));
+
+        if (hasVision) {
+          console.log('  Using moondream vision model for refinement...');
+          const visionPrompt = `Look at this UI screenshot. I have detected these elements: ${
+            (zones?.zones || []).flatMap(z => z.elements.map(e => e.text)).filter(Boolean).slice(0, 20).join(', ')
+          }. What UI components am I missing? List only component names, one per line.`;
+
+          const vRes = await fetch(OLLAMA_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'moondream',
+              prompt: visionPrompt,
+              images: [imageData],
+              stream: false,
+              options: { num_predict: 200 },
+            }),
+            signal: AbortSignal.timeout(60000),
+          });
+
+          if (vRes.ok) {
+            const vPayload = await vRes.json();
+            const missing = vPayload.response || '';
+            console.log(`  ✅ Vision detected missing: ${missing.slice(0, 100)}`);
+            // Append missing components as comments in HTML for now
+            return workingHTML.replace('</body>', `<!-- Vision detected: ${missing.replace(/\n/g,' ')} -->\n</body>`);
+          }
+        }
+      } catch (e) {
+        console.warn(`  Vision model skipped: ${e.message}`);
+      }
+    }
+
+    // Ollama CSS polish
+    const cssPrompt = `Return ONLY JSON {"extra_css":"..."} with CSS for a ${pageKind} page: button hover effects, link hover, input focus, smooth transitions.`;
     try {
       const response = await fetch(OLLAMA_URL, {
         method: 'POST',
@@ -316,21 +381,19 @@ export class LayoutRefiner {
         }),
         signal: AbortSignal.timeout(30000),
       });
-
       if (response.ok) {
         const payload = await response.json();
         const parsed = safeJsonParse(payload.response || '');
         if (parsed?.extra_css?.trim().length > 10) {
           const result = workingHTML.replace('</style>', `  /* Ollama polish */\n  ${parsed.extra_css.trim()}\n</style>`);
-          console.log(`  ✅ Semantic HTML + Ollama CSS polish (${result.length} chars)`);
+          console.log(`  ✅ Semantic HTML + CSS polish (${result.length} chars)`);
           return result;
         }
       }
-    } catch (error) {
-      console.warn(`  ⚠️  Ollama CSS skipped: ${error.message}`);
+    } catch (e) {
+      console.warn(`  ⚠️  Ollama CSS skipped: ${e.message}`);
     }
 
-    console.log(`  ✅ ${semanticHTML ? 'Semantic' : 'Base'} HTML generated (${workingHTML.length} chars)`);
     return workingHTML;
   }
 }

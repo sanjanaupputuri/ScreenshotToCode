@@ -74,6 +74,7 @@ export async function generateCode(imagePath, metadata = {}) {
     image,
     refinement.page_kind || 'generic',
     detection.zones || null,
+    imagePath,
   );
 
   console.log(`${requestLabel}Final HTML length: ${refinedHTML.length}`);

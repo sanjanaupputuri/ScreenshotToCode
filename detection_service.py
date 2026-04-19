@@ -68,7 +68,7 @@ def clean_ocr_text(text):
     if not text:
         return ""
 
-    text = re.sub(r"[^\w\s\-.,!?@#$%&*()+=:/(){}\[\]|<>]", "", text)
+    text = re.sub(r"[^\w\s\-.,!?@#$%&*()+=:/|<>]", "", text)  # remove brackets and other noise
     # Insert space between digit and letter runs (e.g. "1Branch" → "1 Branch")
     text = re.sub(r"(\d)([A-Za-z])", r"\1 \2", text)
     # Insert space between lowercase-to-uppercase transitions (e.g. "GotoFile" → "Goto File")  
@@ -89,9 +89,14 @@ def clean_ocr_text(text):
                     'own','put','say','see','set','she','too','try','use','way','who','why',
                     'pull','push','fork','star','wiki','code','file','type','find','view',
                     'edit','open','copy','save','run','tag','log','raw','zip','tab','nav'}
+    # Known OCR misreads to always drop
+    OCR_GARBAGE_WORDS = {'mae','smee','vour','yout','tne','tbe','ine','lhe','lhe','rne','adn','teh'}
     words = text.split()
     cleaned = []
     for w in words:
+        wl = w.lower()
+        if wl in OCR_GARBAGE_WORDS:
+            continue
         wl = w.lower()
         alpha = sum(c.isalpha() for c in w)
         non_alpha = len(w) - alpha
@@ -417,11 +422,19 @@ def merge_adjacent_text_regions(regions):
         gap = current["x"] - (previous["x"] + previous["width"])
         same_row = abs(curr_center - prev_center) <= max(10, min(previous["height"], current["height"]) * 0.9)
         similar_height = abs(previous["height"] - current["height"]) <= max(10, min(previous["height"], current["height"]) * 0.75)
-        similar_font = abs(previous["font_size"] - current["font_size"]) <= 6
-        reasonable_gap = -2 <= gap <= max(40, min(previous["height"], current["height"]) * 3.0)
+        similar_font = abs(previous["font_size"] - current["font_size"]) <= 10
+        reasonable_gap = -2 <= gap <= max(48, min(previous["height"], current["height"]) * 3.5)
         combined_width = max(previous["x"] + previous["width"], current["x"] + current["width"]) - previous["x"]
 
-        if same_row and similar_height and similar_font and reasonable_gap and combined_width <= 1400:
+        # Don't merge short labels with large gaps — likely separate nav tabs or buttons
+        # Don't merge short labels with large gaps — likely separate nav tabs or buttons
+        prev_words = len(previous.get("text","").split())
+        curr_words = len(current.get("text","").split())
+        avg_h = min(previous["height"], current["height"])
+        looks_like_nav = (prev_words <= 2 and curr_words <= 2 and
+                          gap > avg_h * 2.5 and (prev_words + curr_words) <= 4)
+
+        if same_row and similar_height and similar_font and reasonable_gap and combined_width <= 1400 and not looks_like_nav:
             previous["parts"].extend(expand_parts(current))
             previous["parts"] = sorted(previous["parts"], key=lambda item: item["x"])
             previous["text"] = collapse_duplicate_tokens(" ".join(part["text"] for part in previous["parts"]).strip())
@@ -449,7 +462,7 @@ def merge_adjacent_text_regions(regions):
 
 
 def merge_multiline_text_blocks(regions):
-    """Merge consecutive text regions that are vertically stacked and x-aligned — same paragraph/sentence."""
+    """Merge consecutive text regions that are vertically stacked — same paragraph/sentence."""
     if not regions:
         return regions
 
@@ -465,17 +478,21 @@ def merge_multiline_text_blocks(regions):
         for j, candidate in enumerate(sorted_r):
             if j in used:
                 continue
-            # Must be directly below base (within 1.5x line height)
+            # Must be directly below base (within 2x line height)
             vertical_gap = candidate["y"] - (base["y"] + base["height"])
-            if vertical_gap < 0 or vertical_gap > base["height"] * 1.5:
+            if vertical_gap < 0 or vertical_gap > base["height"] * 2.0:
                 continue
-            # Must x-overlap significantly
-            x_overlap = min(base["x"] + base["width"], candidate["x"] + candidate["width"]) - max(base["x"], candidate["x"])
-            if x_overlap < min(base["width"], candidate["width"]) * 0.4:
+            # Must be in same x-region (left edge within 2x font size)
+            x_dist = abs(candidate["x"] - base["x"])
+            if x_dist > max(base["font_size"] * 2, 40):
                 continue
             # Similar font size
-            if abs(base["font_size"] - candidate["font_size"]) > 4:
+            if abs(base["font_size"] - candidate["font_size"]) > 5:
                 continue
+            # Similar color (same text block)
+            if base.get("text_color") and candidate.get("text_color"):
+                if hex_distance(base["text_color"], candidate["text_color"]) > 40:
+                    continue
             group.append(candidate)
             used.add(j)
 
@@ -576,6 +593,7 @@ def detect_text_regions(image):
     consolidated = consolidate_text_candidates(regions)
     merged = merge_text_regions(consolidated)
     merged = merge_adjacent_text_regions(merged)
+    merged = merge_adjacent_text_regions(merged)  # second pass catches stragglers
     merged = merge_multiline_text_blocks(merged)
     for region in merged:
         region["text"] = collapse_duplicate_tokens(region["text"])
@@ -2018,26 +2036,25 @@ def detect_ui_elements(image_path):
 
 
 def build_zone_analysis(elements, img_w, img_h, page_bg):
-    """Analyze detected elements and build structured zone/role data for semantic HTML generation."""
     texts = [e for e in elements if e.get("kind") == "text" and e.get("text")]
     shapes = [e for e in elements if e.get("kind") == "shape"]
 
-    # Determine theme
     bg_rgb = rgb_from_hex(page_bg) or (255, 255, 255)
     luma = bg_rgb[0] * 0.299 + bg_rgb[1] * 0.587 + bg_rgb[2] * 0.114
     theme = "dark" if luma < 128 else "light"
 
-    # Extract color palette
-    all_text_colors = [e.get("text_color") for e in texts if e.get("text_color") and e.get("text_color") != "transparent"]
-    all_bg_colors = [e.get("background_color") for e in shapes if e.get("background_color") and e.get("background_color") not in ("transparent", "none")]
-    
-    # Find accent color (most saturated non-neutral color)
     accent = None
-    for color in all_text_colors + all_bg_colors:
-        rgb = rgb_from_hex(color)
-        if rgb and not is_neutral_hex(color, 40):
-            accent = color
+    for e in sorted(texts, key=lambda x: x.get("font_size", 0), reverse=True):
+        c = e.get("text_color", "")
+        if c and c != "transparent" and not is_neutral_hex(c, 40):
+            accent = c
             break
+    if not accent:
+        for s in shapes:
+            c = s.get("background_color", "")
+            if c and c not in ("transparent", "none") and not is_neutral_hex(c, 40):
+                accent = c
+                break
 
     palette = {
         "background": page_bg,
@@ -2047,60 +2064,61 @@ def build_zone_analysis(elements, img_w, img_h, page_bg):
         "muted": "#aaaacc" if theme == "dark" else "#57606a",
     }
 
-    # Zone boundaries (% of image height)
+    # Dynamically find navbar bottom from full-width toolbars near top
+    navbar_bottom_pct = 0.10
+    for s in sorted(shapes, key=lambda x: x["y"]):
+        if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.7:
+            bottom_pct = (s["y"] + s["height"]) / img_h
+            if bottom_pct < 0.40:
+                navbar_bottom_pct = max(navbar_bottom_pct, bottom_pct)
+
+    # Find footer top from full-width panels near bottom
+    footer_top_pct = 0.88
+    for s in sorted(shapes, key=lambda x: x["y"], reverse=True):
+        if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.7:
+            top_pct = s["y"] / img_h
+            if top_pct > 0.65:
+                footer_top_pct = min(footer_top_pct, top_pct)
+
     ZONES = [
-        ("navbar",  0.0,  0.12),
-        ("hero",    0.12, 0.50),
-        ("content", 0.50, 0.85),
-        ("footer",  0.85, 1.0),
+        ("navbar",  0.0,               navbar_bottom_pct),
+        ("content", navbar_bottom_pct, footer_top_pct),
+        ("footer",  footer_top_pct,    1.0),
     ]
+
+    right_texts = [e for e in texts if e["x"] / img_w > 0.65
+                   and navbar_bottom_pct < e["y"] / img_h < footer_top_pct]
+    is_two_col = len(right_texts) >= 3
 
     zone_results = []
     for zone_name, y_start, y_end in ZONES:
-        y0 = img_h * y_start
-        y1 = img_h * y_end
-
+        y0, y1 = img_h * y_start, img_h * y_end
         zone_texts = [e for e in texts if y0 <= e["y"] < y1]
         zone_shapes = [e for e in shapes if y0 <= e["y"] < y1]
         if not zone_texts and not zone_shapes:
             continue
 
-        # Find zone background
         zone_bg = page_bg
-        toolbar = next((s for s in zone_shapes if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.5), None)
-        if toolbar:
-            zone_bg = toolbar.get("background_color", page_bg)
+        wide = next((s for s in sorted(zone_shapes, key=lambda x: x.get("width", 0), reverse=True)
+                     if s.get("width", 0) > img_w * 0.5 and s.get("type") in ("toolbar", "panel")), None)
+        if wide:
+            zone_bg = wide.get("background_color", page_bg)
 
-        # Assign semantic roles to text elements
         zone_elements = []
-        sorted_texts = sorted(zone_texts, key=lambda e: (e["y"], e["x"]))
-
-        for e in sorted_texts:
+        for e in sorted(zone_texts, key=lambda x: (x["y"], x["x"])):
             fs = e.get("font_size", 14)
             fw = e.get("font_weight", 400)
             x_pct = e["x"] / img_w
-            text = e.get("text", "")
+            y_pct = e["y"] / img_h
 
             if zone_name == "navbar":
-                if x_pct < 0.15:
-                    role = "logo"
-                elif x_pct > 0.75:
-                    role = "nav-actions"
-                else:
-                    role = "nav-links"
-            elif zone_name == "hero":
-                if fs >= 48:
-                    role = "heading"
-                elif fs >= 24:
-                    role = "subheading"
-                elif CONTROL_ACTION_PATTERN.search(text):
-                    role = "cta-label"
-                else:
-                    role = "body"
+                role = "logo" if x_pct < 0.12 else ("nav-actions" if x_pct > 0.78 else "nav-links")
             elif zone_name == "content":
-                if fs >= 20 and fw >= 600:
-                    role = "section-title"
-                elif x_pct > 0.65:
+                if fs >= 48 or (fs >= 28 and fw >= 700):
+                    role = "heading"
+                elif fs >= 20 and fw >= 600:
+                    role = "subheading"
+                elif is_two_col and x_pct > 0.65:
                     role = "sidebar-text"
                 else:
                     role = "content-text"
@@ -2108,53 +2126,40 @@ def build_zone_analysis(elements, img_w, img_h, page_bg):
                 role = "footer-text"
 
             zone_elements.append({
-                "role": role,
-                "text": text,
+                "role": role, "text": e.get("text", ""),
                 "color": e.get("text_color", palette["text"]),
-                "font_size": fs,
-                "font_weight": fw,
-                "x_pct": round(x_pct, 3),
-                "y_pct": round(e["y"] / img_h, 3),
+                "font_size": fs, "font_weight": fw,
+                "x_pct": round(x_pct, 3), "y_pct": round(y_pct, 3),
             })
 
-        # Add buttons
-        zone_buttons = [s for s in zone_shapes if s.get("type") in ("button", "chip") and s.get("text")]
-        for b in zone_buttons:
+        for b in zone_shapes:
+            if b.get("type") not in ("button", "chip") or not b.get("text"):
+                continue
             zone_elements.append({
-                "role": "button",
-                "text": b.get("text", ""),
+                "role": "button", "text": b.get("text", ""),
                 "bg": b.get("background_color", "#333"),
-                "color": b.get("text_color", "#fff"),
                 "border_radius": b.get("border_radius", 6),
-                "x_pct": round(b["x"] / img_w, 3),
-                "y_pct": round(b["y"] / img_h, 3),
+                "x_pct": round(b["x"] / img_w, 3), "y_pct": round(b["y"] / img_h, 3),
             })
 
-        # Add inputs
-        zone_inputs = [s for s in zone_shapes if s.get("type") == "input"]
-        for inp in zone_inputs:
-            zone_elements.append({
-                "role": "input",
-                "text": inp.get("text", ""),
-                "bg": inp.get("background_color", "#fff"),
-                "border": inp.get("border_color", "#d0d7de"),
-                "x_pct": round(inp["x"] / img_w, 3),
-                "y_pct": round(inp["y"] / img_h, 3),
-            })
+        if zone_name == "navbar":
+            for inp in zone_shapes:
+                if inp.get("type") != "input":
+                    continue
+                zone_elements.append({
+                    "role": "input", "text": inp.get("text", ""),
+                    "bg": inp.get("background_color", "#fff"),
+                    "border": inp.get("border_color", "#d0d7de"),
+                    "x_pct": round(inp["x"] / img_w, 3), "y_pct": round(inp["y"] / img_h, 3),
+                })
 
         zone_results.append({
-            "zone": zone_name,
-            "bg": zone_bg,
+            "zone": zone_name, "bg": zone_bg,
             "elements": sorted(zone_elements, key=lambda e: (e.get("y_pct", 0), e.get("x_pct", 0))),
         })
 
-    return {
-        "palette": palette,
-        "zones": zone_results,
-        "layout": "two-column" if any(
-            e["x"] / img_w > 0.65 for e in texts
-        ) else "single-column",
-    }
+    return {"palette": palette, "zones": zone_results,
+            "layout": "two-column" if is_two_col else "single-column"}
 
 
 def fix_overlapping_text_zindex(elements):
