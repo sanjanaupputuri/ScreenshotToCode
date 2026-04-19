@@ -108,6 +108,7 @@ export async function initializeDatabase() {
         max_value REAL,
         text_condition TEXT,
         color_condition TEXT,
+        UNIQUE(component_id, rule_type, min_value, max_value),
         FOREIGN KEY (component_id) REFERENCES components(id)
       );
 
@@ -125,6 +126,14 @@ export async function initializeDatabase() {
         tailwind_class TEXT NOT NULL,
         rem_value REAL NOT NULL,
         spacing_type TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS page_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        page_kind TEXT UNIQUE NOT NULL,
+        html_scaffold TEXT NOT NULL,
+        css_scaffold TEXT NOT NULL,
+        description TEXT
       );
 
       CREATE TABLE IF NOT EXISTS primitive_profiles (
@@ -231,6 +240,67 @@ async function populateInitialData() {
     ['body_copy', 'text', 'body_text', 1.0, 80.0, 8, 2400, 8, 52, null, 'any', 20, 3, 'body', 'General body copy'],
   ];
 
+  const pageTemplates = [
+    ['landing', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 2rem;height:64px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.15);">{{navContent}}</nav>
+<main>{{heroSection}}{{contentSection}}</main>
+{{footerSection}}`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+nav a{color:{{mutedColor}};text-decoration:none;font-size:14px;font-weight:500;padding:6px 12px;border-radius:6px;transition:color 0.15s;}
+nav a:hover{color:{{textColor}};background:rgba(128,128,128,0.1);}
+button{cursor:pointer;transition:opacity 0.15s,transform 0.1s;}
+button:hover{opacity:0.9;}
+button:active{transform:scale(0.97);}
+input:focus{outline:2px solid {{accentColor}};box-shadow:0 0 0 3px {{accentColor}}33;}`,
+    'Marketing/product landing page'],
+
+    ['repository', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 1rem;height:56px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.2);">{{navContent}}</nav>
+<div style="background:{{tabBg}};border-bottom:1px solid #d0d7de;display:flex;padding:0 1rem;gap:0.25rem;">{{tabContent}}</div>
+<div style="max-width:1280px;margin:0 auto;padding:1rem;">{{repoHeader}}</div>
+<div style="max-width:1280px;margin:0 auto;padding:0 1rem 2rem;display:grid;grid-template-columns:1fr 296px;gap:1.5rem;">{{mainContent}}{{sidebarContent}}</div>`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;background:{{bg}};color:{{textColor}};min-height:100vh;}
+a{color:{{accentColor}};text-decoration:none;}
+a:hover{text-decoration:underline;}
+button{cursor:pointer;transition:opacity 0.15s;}
+button:hover{opacity:0.9;}
+.tab{display:flex;align-items:center;gap:6px;padding:10px 12px;font-size:13px;font-weight:500;color:{{mutedColor}};border-bottom:2px solid transparent;text-decoration:none;}
+.tab:hover{color:{{textColor}};background:rgba(128,128,128,0.05);}
+.tab.active{color:{{textColor}};border-bottom-color:{{accentColor}};}
+.btn{display:flex;align-items:center;gap:5px;padding:5px 12px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;font-size:12px;font-weight:500;cursor:pointer;}
+.btn:hover{background:#f3f4f6;}`,
+    'GitHub/GitLab repository page'],
+
+    ['dashboard', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 1.5rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.2);">{{navContent}}</nav>
+<div style="display:flex;min-height:calc(100vh - 60px);">
+<aside style="width:240px;background:{{sidebarBg}};border-right:1px solid rgba(128,128,128,0.15);padding:1rem 0.75rem;">{{sidebarContent}}</aside>
+<main style="flex:1;padding:1.5rem;">{{mainContent}}</main>
+</div>`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+button{cursor:pointer;transition:opacity 0.15s;}
+button:hover{opacity:0.9;}`,
+    'Analytics/admin dashboard'],
+
+    ['generic', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 2rem;height:60px;gap:1rem;">{{navContent}}</nav>
+<main style="padding:2rem;">{{mainContent}}</main>`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+button{cursor:pointer;transition:opacity 0.15s;}
+button:hover{opacity:0.9;}`,
+    'Generic page'],
+  ];
+
+  const pageTemplateCount = (await get('SELECT COUNT(*) as c FROM page_templates'))?.c ?? 0;
+  if (pageTemplateCount === 0) {
+    for (const [kind, html, css, desc] of pageTemplates) {
+      await run(
+        'INSERT OR IGNORE INTO page_templates (page_kind, html_scaffold, css_scaffold, description) VALUES (?, ?, ?, ?)',
+        [kind, html, css, desc],
+      );
+    }
+  }
+
   const compNames = ['button_primary', 'input_text', 'heading_h1', 'heading_h2', 'card_basic', 'paragraph', 'nav_link', 'image_basic'];
 
   await withTransaction(async () => {
@@ -245,7 +315,7 @@ async function populateInitialData() {
       const compId = (await get('SELECT id FROM components WHERE name = ?', [compNames[idx - 1]]))?.id;
       if (compId) {
         await run(
-          'INSERT INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR IGNORE INTO component_rules (component_id, rule_type, min_value, max_value, text_condition, color_condition) VALUES (?, ?, ?, ?, ?, ?)',
           [compId, ruleType, min, max, textCond, colorCond],
         );
       }
@@ -458,4 +528,12 @@ export async function enrichDetectedElements(elements = []) {
       profile_name: bestProfile.name,
     };
   });
+}
+
+
+export async function getPageTemplate(pageKind) {
+  await initializeDatabase();
+  const row = await get('SELECT * FROM page_templates WHERE page_kind = ?', [pageKind])
+    || await get('SELECT * FROM page_templates WHERE page_kind = ?', ['generic']);
+  return row || null;
 }

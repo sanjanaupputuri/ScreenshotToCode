@@ -53,7 +53,7 @@ export async function generateCode(imagePath, metadata = {}) {
   console.log(`${requestLabel}STAGE 2: NORMALIZING FOR RENDERING`);
   console.log('='.repeat(60));
 
-  const processed = await ComponentService.processElements(detectedElements, image, refinement);
+  const processed = await ComponentService.processElements(detectedElements, image, refinement, detection.zones || null);
   console.log(`${requestLabel}Prepared ${processed.elements.length} renderable elements`);
 
   console.log('\n' + '='.repeat(60));
@@ -64,7 +64,7 @@ export async function generateCode(imagePath, metadata = {}) {
   console.log(`${requestLabel}Base HTML: ${baseHTML.length} chars`);
 
   console.log('\n' + '='.repeat(60));
-  console.log(`${requestLabel}STAGE 4: OLLAMA VISUAL REFINEMENT`);
+  console.log(`${requestLabel}STAGE 4: OLLAMA ENRICHMENT (40% — CSS + semantic markup)`);
   console.log('='.repeat(60));
 
   // Ollama refines the base HTML — improves visual accuracy without changing coordinates
@@ -73,6 +73,8 @@ export async function generateCode(imagePath, metadata = {}) {
     detectedElements,
     image,
     refinement.page_kind || 'generic',
+    detection.zones || null,
+    imagePath,
   );
 
   console.log(`${requestLabel}Final HTML length: ${refinedHTML.length}`);

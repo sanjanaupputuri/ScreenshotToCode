@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Reconstruction</title>
+  <style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: #f2f2f4;
+  color: #1f2328;
+  min-height: 100vh;
+}
+a { color: #686a94; text-decoration: none; }
+a:hover { opacity: 0.8; }
+button { transition: opacity 0.15s, transform 0.1s; }
+button:hover { opacity: 0.9; cursor: pointer; }
+button:active { transform: scale(0.97); }
+input:focus { outline: 2px solid #686a94; box-shadow: 0 0 0 3px #686a9433; }
+nav a:hover { background: rgba(128,128,128,0.1); border-radius: 6px; }
+  </style>
+</head>
+<body>
+<nav style="background:#f2f2f4;display:flex;align-items:center;padding:0 2rem;height:64px;gap:1.5rem;border-bottom:1px solid rgba(128,128,128,0.2);">
+  <span style="color:#66707a;font-size:22px;font-weight:700;white-space:nowrap;flex-shrink:0;">Code Issues</span>
+  
+  <div style="display:flex;align-items:center;gap:0.25rem;flex:1;">
+    <a href="#" style="color:#9198a0;font-size:16px;font-weight:600;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">FIRETRUCK</a><a href="#" style="color:#9198a0;font-size:16px;font-weight:600;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">to search</a><a href="#" style="color:#66707a;font-size:16px;font-weight:700;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">requests</a><a href="#" style="color:#66707a;font-size:16px;font-weight:700;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">Actions</a><a href="#" style="color:#66707a;font-size:16px;font-weight:700;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">Projects</a><a href="#" style="color:#495691;font-size:16px;font-weight:400;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">Wiki</a><a href="#" style="color:#686a94;font-size:16px;font-weight:600;padding:6px 12px;text-decoration:none;border-radius:6px;white-space:nowrap;transition:color 0.15s;">Security Insights</a>
+  </div>
+  <div style="display:flex;align-items:center;gap:0.5rem;">
+    
+    <button style="background:#d8dbdc;color:#1f2328;border:none;border-radius:14px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">Insights</button><button style="background:#dfe0e1;color:#1f2328;border:none;border-radius:13px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">Projects</button><button style="background:#eae9ec;color:#1f2328;border:none;border-radius:9px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">Actions</button><button style="background:#e6e0e6;color:#1f2328;border:none;border-radius:14px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">Security</button>
+  </div>
+</nav>
+<section style="background:#ffffff;padding:4rem 2rem;display:flex;flex-direction:column;align-items:center;text-align:center;gap:1.25rem;">
+  <h1 style="color:#1e2228;font-size:46px;font-weight:700;line-height:1.1;letter-spacing:-0.02em;margin:0;">FIRETRUCK</h1>
+  
+  
+  
+</section>
+<div style="background:#ffffff;display:grid;grid-template-columns:1fr 280px;gap:1.5rem;padding:1.5rem 2rem;max-width:1280px;margin:0 auto;">
+  <div style="display:flex;flex-direction:column;gap:0.5rem;"><div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#202635;font-size:24px;font-weight:600;">FIRETRUCK Public</span><button style="background:#f6f8fa;color:#1f2328;border:none;border-radius:13px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Pin</button><button style="background:#e6e8eb;color:#1f2328;border:none;border-radius:14px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Watch</button></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#4a4d57;font-size:22px;font-weight:600;">main</span><span style="color:#4a4d57;font-size:26px;font-weight:600;">Branch Tags</span><button style="background:#f5f2f5;color:#1f2328;border:none;border-radius:15px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Tags</button><span style="color:#4a4d57;font-size:22px;font-weight:600;">Goto file</span><span style="color:#4a4d57;font-size:23px;font-weight:600;">Add file</span></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#737fa5;font-size:23px;font-weight:600;">Add files via upload</span><span style="color:#848fb9;font-size:18px;font-weight:400;">e551036 minute ago</span><span style="color:#3b496c;font-size:18px;font-weight:400;">Commits</span></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#7d87ae;font-size:28px;font-weight:600;">FIRETRUCK.py</span><span style="color:#7d87ae;font-size:23px;font-weight:600;">Add files via upload</span><span style="color:#7d87ae;font-size:21px;font-weight:600;">minute ago</span></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#465885;font-size:23px;font-weight:400;">README.md</span><span style="color:#7b8ec5;font-size:22px;font-weight:400;">Initial commit</span><span style="color:#7886ae;font-size:21px;font-weight:400;">minute ago</span></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><span style="color:#747d85;font-size:26px;font-weight:600;">README a</span></div>
+    <div style="display:flex;align-items:center;gap:0.75rem;padding:4px 0;flex-wrap:wrap;"><button style="background:#e5e9e5;color:#1f2328;border:none;border-radius:14px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">finding</button><span style="color:#636b8e;font-size:25px;font-weight:600;">finding the shortest path of Firetruck when an accident occurs</span></div></div>
+  <aside style="display:flex;flex-direction:column;gap:0.5rem;"><span style="color:#899cb4;font-size:18px;font-weight:400;">Fork</span>
+    <span style="color:#3d496f;font-size:18px;font-weight:400;">Star</span>
+    <span style="color:#4a4d57;font-size:38px;font-weight:600;">About</span>
+    <span style="color:#636b8e;font-size:25px;font-weight:600;">finding the shortest path of Firetruck</span>
+    <button style="background:#e8ebec;color:#1f2328;border:none;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">Readme</button>
+    <span style="color:#7d87ae;font-size:23px;font-weight:600;">Readme</span>
+    <button style="background:#ffffff;color:#1f2328;border:none;border-radius:9px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">stars</button>
+    <button style="background:#ffffff;color:#1f2328;border:none;border-radius:10px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">forks</button>
+    <span style="color:#2b354c;font-size:25px;font-weight:400;">Releases</span>
+    <span style="color:#7f89ac;font-size:18px;font-weight:400;">No releases published</span>
+    <span style="color:#4da7ee;font-size:16px;font-weight:400;">Create a new release</span>
+    <span style="color:#7f89ac;font-size:23px;font-weight:400;">No packages published</span>
+    <span style="color:#4fa9f0;font-size:18px;font-weight:400;">Publish your first package</span></aside>
+</div>
+<footer style="background:#f2f2f4;padding:1.25rem 2rem;display:flex;align-items:center;gap:2rem;flex-wrap:wrap;border-top:1px solid rgba(128,128,128,0.15);">
+  <span style="color:#373f51;font-size:29px;font-weight:600;">Suggested workflows</span><span style="color:#777e9b;font-size:19px;font-weight:400;">Based on</span><span style="color:#7386ab;font-size:23px;font-weight:400;">tech stack</span>
+</footer>
+<!-- Vision detected:  FIRETRUCK, to search, Code Issues, requests, Actions, Projects, Wiki, Security Insights, Insights, Projects, Actions, Security, Pin, Watch, main, Branch Tags, Goto file. -->
+</body>
+</html>

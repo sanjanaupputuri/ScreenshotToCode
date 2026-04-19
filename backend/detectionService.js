@@ -16,6 +16,7 @@ function runPythonDetection(imagePath) {
 
     let stdout = '';
     let stderr = '';
+
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('Python CLI detection timed out'));
@@ -36,6 +37,7 @@ function runPythonDetection(imagePath) {
 
     child.on('close', (code) => {
       clearTimeout(timer);
+
       if (code !== 0) {
         reject(new Error(stderr.trim() || `Python CLI detection failed with exit code ${code}`));
         return;
@@ -62,21 +64,11 @@ export class DetectionService {
       return {
         components: data.components || [],
         image: data.image || null,
+        zones: data.zones || null,
       };
-
-    } catch (error) {
-      console.warn('Python detection service unavailable, trying CLI detector:', error.message);
-
-      try {
-        const data = await runPythonDetection(absPath);
-        return {
-          components: data.components || [],
-          image: data.image || null,
-        };
-      } catch (cliError) {
-        console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
-        return this.fallbackDetection();
-      }
+    } catch (cliError) {
+      console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
+      return this.fallbackDetection();
     }
   }
 

@@ -236,6 +236,7 @@ export default function ChatScreen({ user, onLogout }) {
     const previewUrl = URL.createObjectURL(file);
     setMessages(prev => [...prev, { sender: "user", text: `📸 ${file.name}`, image: previewUrl }]);
     setLoading(true);
+    setTimeout(() => URL.revokeObjectURL(previewUrl), 60000);
     console.log(`[upload:${uploadId}] selected file`, {
       name: file.name,
       size: file.size,

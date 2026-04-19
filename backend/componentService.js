@@ -263,8 +263,8 @@ function renderBackground(element) {
 function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Infinity) {
   const normalized = String(text || '').replace(/\r/g, '');
   const lines = normalized.split('\n');
-  const weightFactor = fontWeight >= 700 ? 0.62 : fontWeight >= 600 ? 0.59 : 0.56;
-  const spaceWidth = fontSize * 0.33;
+  const weightFactor = fontWeight >= 700 ? 0.58 : fontWeight >= 600 ? 0.56 : 0.52;
+  const spaceWidth = fontSize * 0.28;
 
   let totalLines = 0;
   let widestLine = 0;
@@ -278,7 +278,7 @@ function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Inf
 
     let currentWidth = 0;
     for (const word of words) {
-      const wordWidth = Math.max(fontSize * 0.5, word.length * fontSize * weightFactor);
+      const wordWidth = Math.max(fontSize * 0.4, word.length * fontSize * weightFactor);
       const nextWidth = currentWidth === 0 ? wordWidth : currentWidth + spaceWidth + wordWidth;
       if (nextWidth > maxWidth && currentWidth > 0 && Number.isFinite(maxWidth)) {
         widestLine = Math.max(widestLine, currentWidth);
@@ -299,15 +299,15 @@ function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Inf
   };
 }
 
-function fitTextSize(text, preferredSize, maxWidth, maxHeight, fontWeight = 400, minSize = 9) {
+function fitTextSize(text, preferredSize, maxWidth, maxHeight, fontWeight = 400, minSize = 8) {
   let size = Math.max(minSize, Math.round(preferredSize || 14));
   const targetWidth = Math.max(8, maxWidth || 8);
   const targetHeight = Math.max(size, maxHeight || size);
 
   while (size > minSize) {
     const metrics = textMetricsForEstimate(text, size, fontWeight, targetWidth);
-    const lineHeight = size * 1.18;
-    if (metrics.widestLine <= targetWidth + 0.5 && (metrics.lineCount * lineHeight) <= targetHeight + 0.5) {
+    const lineHeight = size * 1.2;
+    if (metrics.widestLine <= targetWidth + 4 && (metrics.lineCount * lineHeight) <= targetHeight + 4) {
       return size;
     }
     size -= 1;
@@ -448,7 +448,7 @@ function selectInlineText(children = [], semanticType = 'shape') {
   return { text: best.text, node: best.node };
 }
 
-function renderDetachedChildren(children, childrenByParent, frame = null, pageBg = null) {
+function renderDetachedChildren(children, childrenByParent, frame = null, pageBg = null, allElements = []) {
   return children.map((child) => {
     if (child.kind === 'text') {
       return renderText({
@@ -457,7 +457,7 @@ function renderDetachedChildren(children, childrenByParent, frame = null, pageBg
         textAlign: child.textAlign === 'center' ? 'left' : child.textAlign,
       }, frame, pageBg);
     }
-    return renderNode(child, childrenByParent, frame, pageBg);
+    return renderNode(child, childrenByParent, frame, pageBg, allElements);
   }).join('');
 }
 
@@ -484,7 +484,7 @@ function renderInputControl(element, textValue) {
 }
 
 function renderInlineControl(element, textValue, tagName = 'button') {
-  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.82, element.height * 0.72, element.fontWeight || 600, 10);
+  const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.88, element.height * 0.8, element.fontWeight || 600, 9);
   return `<${tagName} ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
     position: 'absolute',
     left: px(element.x),
@@ -494,17 +494,18 @@ function renderInlineControl(element, textValue, tagName = 'button') {
     display: 'flex',
     'align-items': 'center',
     'justify-content': 'center',
-    padding: '0 8%',
+    padding: '0 6%',
     color: element.textColor,
     'font-size': px(fontSize),
     'font-weight': element.fontWeight,
-    'line-height': '1.18',
+    'line-height': '1',
     'text-align': 'center',
+    'white-space': 'nowrap',
     background: element.background,
     border: element.border,
     'border-radius': px(element.borderRadius),
     'z-index': element.zIndex,
-    overflow: 'hidden',
+    overflow: 'visible',
   })}">${escapeHtml(textValue)}</${tagName}>`;
 }
 
@@ -559,11 +560,12 @@ function renderText(element, frame = null, pageBg = null) {
     color: textColor,
     'font-size': px(fittedFontSize),
     'font-weight': element.fontWeight,
-    'line-height': '1.18',
+    'line-height': '1.2',
     'text-align': element.textAlign,
-    'white-space': 'pre-wrap',
-    'word-break': 'break-word',
-    overflow: 'hidden',
+    'white-space': 'normal',
+    'word-wrap': 'normal',
+    'overflow-wrap': 'normal',
+    overflow: 'visible',
     background: 'transparent',
     border: 'none',
     'z-index': localZIndex,
@@ -651,6 +653,16 @@ function findNearestText(element, allElements) {
 
 function renderNode(element, childrenByParent, frame = null, pageBg = null, allElements = []) {
   if (element.kind === 'background') return renderBackground(element);
+  
+  // Skip text elements that are already inlined in their parent button/chip/input
+  // These are rendered via renderInlineControl, not as separate text nodes
+  if (element.kind === 'text' && element.layoutHint === 'fill-center') {
+    return '';
+  }
+  if (element.kind === 'text' && element.layoutHint === 'input-inline') {
+    return '';
+  }
+  
   if (element.kind === 'text') return renderText(element, frame, pageBg);
 
   const children = childrenByParent.get(element.sourceId) || [];
@@ -665,6 +677,8 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
       && element.border === 'none';
     if (isTransparentShape) return '';
     if (element.semanticType === 'input' && element.width < 100) return '';
+    // Skip empty chips - they're likely false positives
+    if (element.semanticType === 'chip' && !element.text) return '';
   }
 
   if (
@@ -672,11 +686,11 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     inlineText &&
     (!CHIP_BADGE_PATTERN.test(inlineText.trim()) || inlineText.split(/\s+/).length > 2 || element.width > 120)
   ) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
   }
 
   if (element.semanticType === 'input' && inlineText && !INPUT_LABEL_PATTERN.test(inlineText)) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg);
+    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
   }
 
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
@@ -708,6 +722,10 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
         }
       }
     }
+    // Skip empty buttons/chips - they're likely false positives
+    if (!label || label.trim().length === 0) {
+      return '';
+    }
     const fontSize = Math.max(11, Math.round(element.height * 0.34));
     const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;
     return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
@@ -729,6 +747,7 @@ export class ComponentService {
     elements = [],
     image = { width: 1440, height: 900, background_color: '#ffffff' },
     refinement = { page_kind: 'generic', hide_shape_ids: [], notes: [] },
+    zones = null,
   ) {
     const enriched = await enrichDetectedElements(elements);
     const normalized = enriched
@@ -747,6 +766,7 @@ export class ComponentService {
         notes: Array.isArray(refinement?.notes) ? refinement.notes : [],
       },
       elements: normalized,
+      zones: zones || null,
     };
   }
 
@@ -754,8 +774,15 @@ export class ComponentService {
     const image = processed.image;
     const elements = processed.elements || [];
     const bodyBg = image.backgroundColor || '#f6f8fa';
-    const hierarchy = buildHierarchy(elements);
+    const pageKind = processed.refinement?.pageKind || 'generic';
 
+    // Use semantic HTML only for repository/dashboard pages
+    const SEMANTIC_KINDS = ['repository', 'dashboard', 'docs'];
+    if (SEMANTIC_KINDS.includes(pageKind)) {
+      return ComponentService.generateSemanticHTML(processed);
+    }
+
+    const hierarchy = buildHierarchy(elements);
     const markup = hierarchy.roots
       .map((element) => renderNode(element, hierarchy.childrenByParent, null, bodyBg, elements))
       .join('\n    ');
@@ -810,6 +837,130 @@ export class ComponentService {
     ${markup}
     </section>
   </main>
+</body>
+</html>
+`;
+  }
+
+  static generateSemanticHTML(processed) {
+    const image = processed.image;
+    const elements = processed.elements || [];
+    const bodyBg = image.backgroundColor || '#f6f8fa';
+    const isDark = (() => { const rgb = hexToRgb(bodyBg); return rgb ? (rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114) < 128 : false; })();
+    const textColor = isDark ? '#f0f0f0' : '#1f2328';
+    const mutedColor = isDark ? '#aaaacc' : '#57606a';
+    const imgH = image.height || 900;
+
+    const sorted = [...elements].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+    // Band detection by y position
+    const navH = imgH * 0.12;
+    const tabH = imgH * 0.20;
+    const headerH = imgH * 0.30;
+    const footerY = imgH * 0.85;
+
+    const navTexts = sorted.filter(e => e.kind === 'text' && e.y < navH);
+    const tabTexts = sorted.filter(e => e.kind === 'text' && e.y >= navH && e.y < tabH);
+    const headerTexts = sorted.filter(e => e.kind === 'text' && e.y >= tabH && e.y < headerH);
+    const bodyTexts = sorted.filter(e => e.kind === 'text' && e.y >= headerH && e.y < footerY);
+    const footerTexts = sorted.filter(e => e.kind === 'text' && e.y >= footerY);
+    const buttons = sorted.filter(e => e.kind === 'shape' && (e.semanticType === 'button' || e.semanticType === 'chip') && e.text);
+    const inputs = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'input');
+
+    const navBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y < navH)?.background || (isDark ? '#1c1a2a' : '#24292f');
+    const tabBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y >= navH && e.y < tabH)?.background || bodyBg;
+
+    const esc = escapeHtml;
+    const col = (e) => e.textColor || textColor;
+    const fs = (e, min = 12) => `${Math.max(min, e.fontSize || 14)}px`;
+    const fw = (e) => e.fontWeight || 400;
+
+    // NAV
+    const logoEl = navTexts.sort((a,b) => a.x - b.x)[0];
+    const navLinkEls = navTexts.filter(e => e !== logoEl).sort((a,b) => a.x - b.x);
+    const navBtnEls = buttons.filter(e => e.y < navH);
+    const navInputEls = inputs.filter(e => e.y < navH);
+
+    const navHTML = `<nav style="background:${navBg};display:flex;align-items:center;padding:0 1.5rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.2);">
+  ${logoEl ? `<span style="color:${col(logoEl)};font-size:${fs(logoEl,16)};font-weight:700;white-space:nowrap;">${esc(logoEl.text)}</span>` : ''}
+  ${navInputEls.map(e => `<input placeholder="${esc(e.text||'Search')}" style="background:${e.background};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 10px;font-size:13px;color:${col(e)};outline:none;width:200px;" />`).join('')}
+  <div style="display:flex;align-items:center;gap:0.25rem;margin-left:auto;">
+    ${navLinkEls.map(e => `<a href="#" style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};padding:5px 10px;text-decoration:none;white-space:nowrap;">${esc(e.text)}</a>`).join('')}
+    ${navBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:6px 14px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+  </div>
+</nav>`;
+
+    // TABS / SUB-NAV
+    const tabHTML = tabTexts.length ? `<div style="background:${tabBg};display:flex;align-items:center;padding:0 1.5rem;border-bottom:1px solid #d0d7de;gap:0.25rem;">
+  ${tabTexts.sort((a,b)=>a.x-b.x).map(e => `<a href="#" style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};padding:10px 12px;text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent;">${esc(e.text)}</a>`).join('')}
+</div>` : '';
+
+    // HEADER ROW (repo title, badges, action buttons)
+    const headerBtnEls = buttons.filter(e => e.y >= tabH && e.y < headerH);
+    const headerHTML = (headerTexts.length || headerBtnEls.length) ? `<div style="display:flex;align-items:center;gap:0.75rem;padding:1rem 1.5rem;flex-wrap:wrap;border-bottom:1px solid #d0d7de;">
+  ${headerTexts.sort((a,b)=>a.x-b.x).map(e => `<span style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};white-space:nowrap;">${esc(e.text)}</span>`).join('')}
+  <div style="margin-left:auto;display:flex;gap:0.5rem;flex-wrap:wrap;">
+    ${headerBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 12px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+  </div>
+</div>` : '';
+
+    // BODY — group by rows, split left/right by x midpoint
+    const midX = image.width * 0.7;
+    const leftTexts = bodyTexts.filter(e => e.x < midX);
+    const rightTexts = bodyTexts.filter(e => e.x >= midX);
+    const bodyBtnEls = buttons.filter(e => e.y >= headerH && e.y < footerY);
+    const bodyInputEls = inputs.filter(e => e.y >= headerH && e.y < footerY);
+
+    // Group left texts into rows
+    const rows = [];
+    for (const el of [...leftTexts, ...bodyBtnEls.filter(e=>e.x<midX), ...bodyInputEls.filter(e=>e.x<midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x))) {
+      const row = rows.find(r => Math.abs(r.y - el.y) < Math.max(el.height||14, 20));
+      if (row) row.items.push(el);
+      else rows.push({ y: el.y, items: [el] });
+    }
+
+    const renderItem = (el) => {
+      if (el.kind === 'text') return `<span style="color:${col(el)};font-size:${fs(el,12)};font-weight:${fw(el)};">${esc(el.text)}</span>`;
+      if (el.semanticType === 'input') return `<input placeholder="${esc(el.text||'')}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;padding:4px 8px;font-size:${fs(el,12)};color:${col(el)};outline:none;" />`;
+      return `<button style="background:${el.background};color:${el.textColor||bestContrastText(el.background)};border:${el.border};border-radius:${el.borderRadius}px;padding:5px 12px;font-size:${fs(el,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(el.text)}</button>`;
+    };
+
+    const mainHTML = `<div style="display:flex;gap:1.5rem;padding:1rem 1.5rem;max-width:1280px;margin:0 auto;">
+  <div style="flex:1;min-width:0;">
+    ${rows.map(row => `<div style="display:flex;align-items:center;gap:0.75rem;padding:6px 0;flex-wrap:wrap;">${row.items.sort((a,b)=>a.x-b.x).map(renderItem).join('')}</div>`).join('\n    ')}
+  </div>
+  ${rightTexts.length ? `<div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem;">
+    ${[...rightTexts, ...bodyBtnEls.filter(e=>e.x>=midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x)).map(renderItem).join('\n    ')}
+  </div>` : ''}
+</div>`;
+
+    // FOOTER
+    const footerBg = sorted.find(e => e.kind === 'shape' && e.y >= footerY)?.background || bodyBg;
+    const footerHTML = footerTexts.length ? `<footer style="background:${footerBg};padding:1rem 1.5rem;display:flex;gap:1.5rem;flex-wrap:wrap;border-top:1px solid #d0d7de;">
+  ${footerTexts.sort((a,b)=>a.x-b.x).map(e => `<span style="color:${col(e)};font-size:${fs(e,12)};font-weight:${fw(e)};">${esc(e.text)}</span>`).join('')}
+</footer>` : '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generated UI</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: ${bodyBg}; color: ${textColor}; min-height: 100vh; }
+    a:hover { opacity: 0.8; }
+    button { transition: opacity 0.15s; }
+    button:hover { opacity: 0.9; cursor: pointer; }
+    input:focus { outline: 2px solid #0969da; }
+  </style>
+</head>
+<body>
+${navHTML}
+${tabHTML}
+${headerHTML}
+${mainHTML}
+${footerHTML}
 </body>
 </html>`;
   }
