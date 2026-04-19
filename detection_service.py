@@ -462,7 +462,7 @@ def merge_adjacent_text_regions(regions):
 
 
 def merge_multiline_text_blocks(regions):
-    """Merge consecutive text regions that are vertically stacked — same paragraph/sentence."""
+    """Merge vertically stacked text regions that form a single paragraph/heading."""
     if not regions:
         return regions
 
@@ -489,7 +489,7 @@ def merge_multiline_text_blocks(regions):
             # Similar font size
             if abs(base["font_size"] - candidate["font_size"]) > 5:
                 continue
-            # Similar color (same text block)
+            # Similar color
             if base.get("text_color") and candidate.get("text_color"):
                 if hex_distance(base["text_color"], candidate["text_color"]) > 40:
                     continue
@@ -1966,6 +1966,8 @@ def downscale_element(element, factor):
     """Divide all pixel coordinates and sizes back to original image space."""
     for key in ("x", "y", "width", "height"):
         element[key] = max(1 if key in ("width", "height") else 0, round(element[key] / factor))
+    if "font_size" in element and element["font_size"] > 0:
+        element["font_size"] = max(8, round(element["font_size"] / factor))
     element["area"] = element["width"] * element["height"]
     return element
 

@@ -142,24 +142,51 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const zoneMap = {};
   for (const z of zones.zones) zoneMap[z.zone] = z;
 
-  // Filter garbage from all zone elements
+  // Filter garbage from all zone elements + deduplicate across zones
+  const seenTexts = new Set();
   for (const z of Object.values(zoneMap)) {
-    z.elements = (z.elements || []).filter(e => !isGarbage(e.text));
+    z.elements = (z.elements || []).filter(e => {
+      if (isGarbage(e.text)) return false;
+      // Drop known OCR artifacts
+      if (/^README\s+[a-z]$/i.test(e.text)) return false;
+      return true;
+    });
+  }
+
+  // Remove nav button duplicates — if same text exists as nav-link, drop the button
+  const navLinkTexts = new Set((zoneMap['navbar']?.elements || [])
+    .filter(e => e.role === 'nav-links').map(e => e.text));
+  if (zoneMap['navbar']) {
+    zoneMap['navbar'].elements = zoneMap['navbar'].elements.filter(e =>
+      e.role !== 'button' || !navLinkTexts.has(e.text)
+    );
+  }
+
+  // Deduplicate content: if same text in both main (x<0.65) and sidebar (x>=0.65), keep only one
+  if (zoneMap['content']) {
+    const mainTexts = new Set(zoneMap['content'].elements
+      .filter(e => (e.x_pct||0) < 0.65).map(e => e.text));
+    zoneMap['content'].elements = zoneMap['content'].elements.filter(e => {
+      if ((e.x_pct||0) >= 0.65 && mainTexts.has(e.text)) return false;
+      return true;
+    });
   }
 
   const navbar = zoneMap['navbar'];
-  const hero = zoneMap['hero'];
   const contentZone = zoneMap['content'];
   const footer = zoneMap['footer'];
 
-  // NAV
+  const NAV_TAB_WORDS = /^(code|issues|pull|actions|projects|wiki|security|insights|settings|requests)$/i;
+
+  // NAV — logo is leftmost non-tab element
   const navBg = navbar?.bg || (theme === 'dark' ? '#1c1a2a' : '#24292f');
   const navTextColor = theme === 'dark' ? '#f0f0f0' : '#cdd9e5';
-  let logoEl = navbar?.elements?.find(e => e.role === 'logo');
-  let navLinks = navbar?.elements?.filter(e => e.role === 'nav-links') || [];
-  let navActions = navbar?.elements?.filter(e => e.role === 'nav-actions') || [];
-  let navButtons = navbar?.elements?.filter(e => e.role === 'button') || [];
-  let navInputs = navbar?.elements?.filter(e => e.role === 'input') || [];
+  const navEls = (navbar?.elements || []).sort((a,b) => (a.x_pct||0)-(b.x_pct||0));
+  const logoEl = navEls.find(e => e.role === 'logo' && (e.x_pct||0) < 0.15 && !NAV_TAB_WORDS.test(e.text));
+  const navLinks = navEls.filter(e => e.role === 'nav-links' && e !== logoEl);
+  const navActions = navEls.filter(e => e.role === 'nav-actions');
+  const navButtons = navEls.filter(e => e.role === 'button');
+  const navInputs = navEls.filter(e => e.role === 'input');
 
   const navHTML = `<nav style="background:${navBg};display:flex;align-items:center;padding:0 2rem;height:64px;gap:1.5rem;border-bottom:1px solid rgba(128,128,128,0.2);">
   ${logoEl ? `<span style="color:${logoEl.color};font-size:${Math.min(logoEl.font_size||18,22)}px;font-weight:700;white-space:nowrap;flex-shrink:0;">${esc(logoEl.text)}</span>` : ''}
@@ -173,28 +200,35 @@ function buildSemanticFromZones(zones, pageKind, image) {
   </div>
 </nav>`;
 
-  // HERO — use hero zone if exists, otherwise find large headings from content zone
+  // HERO — find large headings from content zone (font_size >= 40, clearly a hero heading)
   let heroHTML = '';
   const heroZone = zoneMap['hero'];
 
-  // Collect hero elements: from hero zone OR large headings from content zone
   let heroEls = heroZone?.elements || [];
   let promotedHeadings = [];
   if (!heroEls.length && contentZone?.elements?.length) {
-    // Promote large headings from content to hero
-    promotedHeadings = contentZone.elements.filter(e => e.font_size >= 48 || (e.font_size >= 28 && e.font_weight >= 700));
+    // Only promote very large headings (font_size >= 40) — not subtitles
+    promotedHeadings = contentZone.elements.filter(e =>
+      e.font_size >= 40 && e.font_weight >= 700 && e.role !== 'sidebar-text'
+    );
     heroEls = promotedHeadings;
   }
 
   if (heroEls.length) {
     const heroBg = heroZone?.bg || contentZone?.bg || bg;
-    const headings = heroEls.filter(e => e.role === 'heading' || e.font_size >= 48 || (e.font_size >= 28 && e.font_weight >= 700));
+    const headings = heroEls.filter(e => e.role === 'heading' || e.font_size >= 40 || (e.font_size >= 28 && e.font_weight >= 700));
     const subheadings = heroEls.filter(e => !headings.includes(e) && (e.role === 'subheading' || e.font_size >= 18));
     const bodyEls = heroEls.filter(e => !headings.includes(e) && !subheadings.includes(e));
     const heroBtns = heroEls.filter(e => e.role === 'button');
 
+    // Join multiple headings into one sentence (staggered hero text design)
+    const headingText = headings.map(e => e.text).join(' ');
+    const headingColor = headings[0]?.color || textColor;
+    const headingSize = Math.max(...headings.map(e => e.font_size || 14));
+    const headingWeight = Math.max(...headings.map(e => e.font_weight || 700));
+
     heroHTML = `<section style="background:${heroBg};padding:4rem 2rem;display:flex;flex-direction:column;align-items:center;text-align:center;gap:1.25rem;">
-  ${headings.map(e => `<h1 style="color:${e.color};font-size:${e.font_size}px;font-weight:${e.font_weight||800};line-height:1.1;letter-spacing:-0.02em;margin:0;">${esc(e.text)}</h1>`).join('')}
+  ${headingText ? `<h1 style="color:${headingColor};font-size:${headingSize}px;font-weight:${headingWeight};line-height:1.1;letter-spacing:-0.02em;margin:0;max-width:900px;">${esc(headingText)}</h1>` : ''}
   ${subheadings.map(e => `<h2 style="color:${e.color};font-size:${e.font_size}px;font-weight:${e.font_weight||600};line-height:1.3;margin:0;max-width:700px;">${esc(e.text)}</h2>`).join('')}
   ${bodyEls.map(e => `<p style="color:${e.color};font-size:${e.font_size||16}px;line-height:1.6;margin:0;max-width:600px;">${esc(e.text)}</p>`).join('')}
   ${heroBtns.length ? `<div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:0.5rem;">${heroBtns.map(e => `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||50}px;padding:14px 32px;font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}</div>` : ''}
@@ -216,10 +250,11 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const sideEls = contentZoneRef.elements.filter(e => (e.x_pct || 0) >= midX);
 
     const renderEl = (e) => {
-      if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:6px 16px;font-size:${e.font_size||13}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
+      if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:6px 16px;font-size:${Math.min(e.font_size||13,16)}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
       if (e.role === 'input') return `<input placeholder="${esc(e.text||'')}" style="background:${e.bg||'#fff'};border:1px solid ${e.border||'#d0d7de'};border-radius:6px;padding:5px 10px;font-size:13px;outline:none;" />`;
-      if (e.role === 'section-title') return `<h3 style="color:${e.color};font-size:${e.font_size||16}px;font-weight:${e.font_weight||700};margin:0;">${esc(e.text)}</h3>`;
-      return `<span style="color:${e.color};font-size:${e.font_size||14}px;font-weight:${e.font_weight||400};">${esc(e.text)}</span>`;
+      const fs = Math.min(e.font_size||14, 32); // cap font size for content text
+      if (fs >= 20 && e.font_weight >= 600) return `<h3 style="color:${e.color};font-size:${fs}px;font-weight:${e.font_weight};margin:0;white-space:nowrap;">${esc(e.text)}</h3>`;
+      return `<span style="color:${e.color};font-size:${fs}px;font-weight:${e.font_weight||400};white-space:nowrap;">${esc(e.text)}</span>`;
     };
 
     // Group main elements into rows by y_pct proximity
