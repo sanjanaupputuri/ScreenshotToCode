@@ -69,6 +69,10 @@ def clean_ocr_text(text):
         return ""
 
     text = re.sub(r"[^\w\s\-.,!?@#$%&*()+=:/(){}\[\]|<>]", "", text)
+    # Insert space between digit and letter runs (e.g. "1Branch" → "1 Branch")
+    text = re.sub(r"(\d)([A-Za-z])", r"\1 \2", text)
+    # Insert space between lowercase-to-uppercase transitions (e.g. "GotoFile" → "Goto File")  
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     text = " ".join(text.split())
     if len(text) < 1:
         return ""
@@ -82,7 +86,9 @@ def clean_ocr_text(text):
                     'my','no','of','on','or','so','to','up','us','we','the','and','for',
                     'not','but','are','was','has','had','its','via','ago','pin','add','new',
                     'all','can','did','get','got','how','let','may','now','old','our','out',
-                    'own','put','say','see','set','she','too','try','use','way','who','why'}
+                    'own','put','say','see','set','she','too','try','use','way','who','why',
+                    'pull','push','fork','star','wiki','code','file','type','find','view',
+                    'edit','open','copy','save','run','tag','log','raw','zip','tab','nav'}
     words = text.split()
     cleaned = []
     for w in words:
@@ -97,6 +103,11 @@ def clean_ocr_text(text):
             # Drop if has non-alpha symbols mixed in (OCR artifact like "Type(Z]", "jaa}")
             if non_alpha > 0 and len(w) <= 6:
                 continue
+            # Drop known OCR garbage patterns (e.g. "vour"→"your" misread, "mae", "smee")
+            if len(w) <= 5 and not any(c.isdigit() for c in w):
+                vowels = sum(1 for c in w.lower() if c in 'aeiou')
+                if vowels == 0:
+                    continue  # no vowels = garbage
             cleaned.append(w)
         # Drop 1-3 char tokens that aren't pure alpha (e.g. "[3", "fF", "Oo")
         elif alpha == len(w):
@@ -315,7 +326,7 @@ def merge_text_regions(regions):
         match = None
         for line in lines:
             same_baseline = abs(region["y"] - line["y"]) <= max(10, int(line["height"] * 0.7))
-            close_x = region["x"] <= line["x"] + line["width"] + 24
+            close_x = region["x"] <= line["x"] + line["width"] + max(24, int(line["height"] * 1.5))
             similar_height = abs(region["height"] - line["height"]) <= max(10, int(line["height"] * 0.8))
             if same_baseline and close_x and similar_height:
                 match = line
@@ -404,13 +415,13 @@ def merge_adjacent_text_regions(regions):
         prev_center = previous["y"] + previous["height"] / 2
         curr_center = current["y"] + current["height"] / 2
         gap = current["x"] - (previous["x"] + previous["width"])
-        same_row = abs(curr_center - prev_center) <= max(8, min(previous["height"], current["height"]) * 0.8)
-        similar_height = abs(previous["height"] - current["height"]) <= max(8, min(previous["height"], current["height"]) * 0.65)
-        similar_font = abs(previous["font_size"] - current["font_size"]) <= 4
-        reasonable_gap = -2 <= gap <= max(28, min(previous["height"], current["height"]) * 2.4)
+        same_row = abs(curr_center - prev_center) <= max(10, min(previous["height"], current["height"]) * 0.9)
+        similar_height = abs(previous["height"] - current["height"]) <= max(10, min(previous["height"], current["height"]) * 0.75)
+        similar_font = abs(previous["font_size"] - current["font_size"]) <= 6
+        reasonable_gap = -2 <= gap <= max(40, min(previous["height"], current["height"]) * 3.0)
         combined_width = max(previous["x"] + previous["width"], current["x"] + current["width"]) - previous["x"]
 
-        if same_row and similar_height and similar_font and reasonable_gap and combined_width <= 420:
+        if same_row and similar_height and similar_font and reasonable_gap and combined_width <= 1400:
             previous["parts"].extend(expand_parts(current))
             previous["parts"] = sorted(previous["parts"], key=lambda item: item["x"])
             previous["text"] = collapse_duplicate_tokens(" ".join(part["text"] for part in previous["parts"]).strip())
@@ -435,6 +446,60 @@ def merge_adjacent_text_regions(regions):
             region["parts"] = sorted(region["parts"], key=lambda item: item["x"])
 
     return dedupe_regions(merged)
+
+
+def merge_multiline_text_blocks(regions):
+    """Merge consecutive text regions that are vertically stacked and x-aligned — same paragraph/sentence."""
+    if not regions:
+        return regions
+
+    sorted_r = sorted(regions, key=lambda r: (r["x"], r["y"]))
+    merged = []
+    used = set()
+
+    for i, base in enumerate(sorted_r):
+        if i in used:
+            continue
+        group = [base]
+        used.add(i)
+        for j, candidate in enumerate(sorted_r):
+            if j in used:
+                continue
+            # Must be directly below base (within 1.5x line height)
+            vertical_gap = candidate["y"] - (base["y"] + base["height"])
+            if vertical_gap < 0 or vertical_gap > base["height"] * 1.5:
+                continue
+            # Must x-overlap significantly
+            x_overlap = min(base["x"] + base["width"], candidate["x"] + candidate["width"]) - max(base["x"], candidate["x"])
+            if x_overlap < min(base["width"], candidate["width"]) * 0.4:
+                continue
+            # Similar font size
+            if abs(base["font_size"] - candidate["font_size"]) > 4:
+                continue
+            group.append(candidate)
+            used.add(j)
+
+        if len(group) == 1:
+            merged.append(base)
+            continue
+
+        group = sorted(group, key=lambda r: r["y"])
+        combined_text = collapse_duplicate_tokens(" ".join(r["text"] for r in group))
+        x0 = min(r["x"] for r in group)
+        y0 = min(r["y"] for r in group)
+        x1 = max(r["x"] + r["width"] for r in group)
+        y1 = max(r["y"] + r["height"] for r in group)
+        result = dict(group[0])
+        result["text"] = combined_text
+        result["x"] = x0
+        result["y"] = y0
+        result["width"] = x1 - x0
+        result["height"] = y1 - y0
+        result["area"] = result["width"] * result["height"]
+        result["quality"] = score_text_quality(combined_text)
+        merged.append(result)
+
+    return sorted(merged, key=lambda r: (r["y"], r["x"]))
 
 
 def detect_text_regions(image):
@@ -511,6 +576,7 @@ def detect_text_regions(image):
     consolidated = consolidate_text_candidates(regions)
     merged = merge_text_regions(consolidated)
     merged = merge_adjacent_text_regions(merged)
+    merged = merge_multiline_text_blocks(merged)
     for region in merged:
         region["text"] = collapse_duplicate_tokens(region["text"])
         region["quality"] = score_text_quality(region["text"])
@@ -667,7 +733,13 @@ def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width,
     if y < image_h * 0.12 and h <= image_h * 0.08 and w > image_w * 0.45:
         return "toolbar"
     if 0.75 <= aspect <= 1.25 and 10 <= w <= 96 and 10 <= h <= 96 and text_count == 0:
-        return "avatar" if w >= 24 and h >= 24 else "icon"
+        # Reject if fill is bright on a dark page — likely a letter outline, not an avatar/icon
+        fill_brightness = float(np.mean(fill_bgr)) if fill_bgr is not None else 255.0
+        page_brightness = float(np.mean(page_background)) if page_background is not None else 128.0
+        if fill_brightness > 180 and page_brightness < 120:
+            pass  # fall through — not an avatar
+        else:
+            return "avatar" if w >= 24 and h >= 24 else "icon"
     if w >= 160 and 4.0 <= aspect <= 20.0 and 24 <= h <= 72 and (brightness > 238 or (border_width > 0 and brightness > 220)):
         return "input"
 
@@ -1032,8 +1104,17 @@ def detect_shape_regions(image, text_regions, page_background):
         fill_vs_roi_dist = np.linalg.norm(fill_bgr.astype(float) - roi_median.astype(float))
         # If fill is very different from the overall roi median AND roi is dark, it's text on bg
         roi_brightness = float(np.mean(roi_median))
-        if fill_vs_roi_dist > 60 and roi_brightness < 100:
+        page_brightness = float(np.mean(page_background))
+        if fill_vs_roi_dist > 60 and roi_brightness < 120:
             # The contour fill is a bright/colored text on a dark background — skip
+            continue
+
+        # Skip small near-square bright shapes on dark pages — these are letter outlines from large text
+        fill_brightness = float(np.mean(fill_bgr))
+        aspect_ratio = w / max(h, 1)
+        if (0.5 <= aspect_ratio <= 2.0 and w <= 120 and h <= 120
+                and fill_brightness > 180 and page_brightness < 120
+                and not linked_texts):
             continue
 
         linked_texts = []
@@ -1922,6 +2003,9 @@ def detect_ui_elements(image_path):
     
     elements = fix_overlapping_text_zindex(elements)
 
+    # Build structured zone analysis for high-quality HTML generation
+    zones = build_zone_analysis(elements, orig_w, orig_h, hex_from_bgr(page_background))
+
     return {
         "image": {
             "width": orig_w,
@@ -1929,6 +2013,147 @@ def detect_ui_elements(image_path):
             "background_color": background["background_color"],
         },
         "components": elements[:220],
+        "zones": zones,
+    }
+
+
+def build_zone_analysis(elements, img_w, img_h, page_bg):
+    """Analyze detected elements and build structured zone/role data for semantic HTML generation."""
+    texts = [e for e in elements if e.get("kind") == "text" and e.get("text")]
+    shapes = [e for e in elements if e.get("kind") == "shape"]
+
+    # Determine theme
+    bg_rgb = rgb_from_hex(page_bg) or (255, 255, 255)
+    luma = bg_rgb[0] * 0.299 + bg_rgb[1] * 0.587 + bg_rgb[2] * 0.114
+    theme = "dark" if luma < 128 else "light"
+
+    # Extract color palette
+    all_text_colors = [e.get("text_color") for e in texts if e.get("text_color") and e.get("text_color") != "transparent"]
+    all_bg_colors = [e.get("background_color") for e in shapes if e.get("background_color") and e.get("background_color") not in ("transparent", "none")]
+    
+    # Find accent color (most saturated non-neutral color)
+    accent = None
+    for color in all_text_colors + all_bg_colors:
+        rgb = rgb_from_hex(color)
+        if rgb and not is_neutral_hex(color, 40):
+            accent = color
+            break
+
+    palette = {
+        "background": page_bg,
+        "theme": theme,
+        "accent": accent or ("#ff4a36" if theme == "dark" else "#0969da"),
+        "text": "#f0f0f0" if theme == "dark" else "#1f2328",
+        "muted": "#aaaacc" if theme == "dark" else "#57606a",
+    }
+
+    # Zone boundaries (% of image height)
+    ZONES = [
+        ("navbar",  0.0,  0.12),
+        ("hero",    0.12, 0.50),
+        ("content", 0.50, 0.85),
+        ("footer",  0.85, 1.0),
+    ]
+
+    zone_results = []
+    for zone_name, y_start, y_end in ZONES:
+        y0 = img_h * y_start
+        y1 = img_h * y_end
+
+        zone_texts = [e for e in texts if y0 <= e["y"] < y1]
+        zone_shapes = [e for e in shapes if y0 <= e["y"] < y1]
+        if not zone_texts and not zone_shapes:
+            continue
+
+        # Find zone background
+        zone_bg = page_bg
+        toolbar = next((s for s in zone_shapes if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.5), None)
+        if toolbar:
+            zone_bg = toolbar.get("background_color", page_bg)
+
+        # Assign semantic roles to text elements
+        zone_elements = []
+        sorted_texts = sorted(zone_texts, key=lambda e: (e["y"], e["x"]))
+
+        for e in sorted_texts:
+            fs = e.get("font_size", 14)
+            fw = e.get("font_weight", 400)
+            x_pct = e["x"] / img_w
+            text = e.get("text", "")
+
+            if zone_name == "navbar":
+                if x_pct < 0.15:
+                    role = "logo"
+                elif x_pct > 0.75:
+                    role = "nav-actions"
+                else:
+                    role = "nav-links"
+            elif zone_name == "hero":
+                if fs >= 48:
+                    role = "heading"
+                elif fs >= 24:
+                    role = "subheading"
+                elif CONTROL_ACTION_PATTERN.search(text):
+                    role = "cta-label"
+                else:
+                    role = "body"
+            elif zone_name == "content":
+                if fs >= 20 and fw >= 600:
+                    role = "section-title"
+                elif x_pct > 0.65:
+                    role = "sidebar-text"
+                else:
+                    role = "content-text"
+            else:
+                role = "footer-text"
+
+            zone_elements.append({
+                "role": role,
+                "text": text,
+                "color": e.get("text_color", palette["text"]),
+                "font_size": fs,
+                "font_weight": fw,
+                "x_pct": round(x_pct, 3),
+                "y_pct": round(e["y"] / img_h, 3),
+            })
+
+        # Add buttons
+        zone_buttons = [s for s in zone_shapes if s.get("type") in ("button", "chip") and s.get("text")]
+        for b in zone_buttons:
+            zone_elements.append({
+                "role": "button",
+                "text": b.get("text", ""),
+                "bg": b.get("background_color", "#333"),
+                "color": b.get("text_color", "#fff"),
+                "border_radius": b.get("border_radius", 6),
+                "x_pct": round(b["x"] / img_w, 3),
+                "y_pct": round(b["y"] / img_h, 3),
+            })
+
+        # Add inputs
+        zone_inputs = [s for s in zone_shapes if s.get("type") == "input"]
+        for inp in zone_inputs:
+            zone_elements.append({
+                "role": "input",
+                "text": inp.get("text", ""),
+                "bg": inp.get("background_color", "#fff"),
+                "border": inp.get("border_color", "#d0d7de"),
+                "x_pct": round(inp["x"] / img_w, 3),
+                "y_pct": round(inp["y"] / img_h, 3),
+            })
+
+        zone_results.append({
+            "zone": zone_name,
+            "bg": zone_bg,
+            "elements": sorted(zone_elements, key=lambda e: (e.get("y_pct", 0), e.get("x_pct", 0))),
+        })
+
+    return {
+        "palette": palette,
+        "zones": zone_results,
+        "layout": "two-column" if any(
+            e["x"] / img_w > 0.65 for e in texts
+        ) else "single-column",
     }
 
 

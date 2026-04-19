@@ -53,7 +53,7 @@ export async function generateCode(imagePath, metadata = {}) {
   console.log(`${requestLabel}STAGE 2: NORMALIZING FOR RENDERING`);
   console.log('='.repeat(60));
 
-  const processed = await ComponentService.processElements(detectedElements, image, refinement);
+  const processed = await ComponentService.processElements(detectedElements, image, refinement, detection.zones || null);
   console.log(`${requestLabel}Prepared ${processed.elements.length} renderable elements`);
 
   console.log('\n' + '='.repeat(60));
@@ -73,6 +73,7 @@ export async function generateCode(imagePath, metadata = {}) {
     detectedElements,
     image,
     refinement.page_kind || 'generic',
+    detection.zones || null,
   );
 
   console.log(`${requestLabel}Final HTML length: ${refinedHTML.length}`);

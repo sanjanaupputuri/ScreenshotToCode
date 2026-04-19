@@ -62,6 +62,7 @@ export class DetectionService {
       return {
         components: data.components || [],
         image: data.image || null,
+        zones: data.zones || null,
       };
     } catch (cliError) {
       console.warn('Python CLI detection unavailable, using fallback:', cliError.message);
