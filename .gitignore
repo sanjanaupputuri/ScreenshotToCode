@@ -27,7 +27,5 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Vite
-frontend/.vite/
-__pycache__/
-*.pyc
+# Test output files
+test*.html

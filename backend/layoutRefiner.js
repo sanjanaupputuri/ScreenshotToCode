@@ -149,7 +149,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
 
   const navbar = zoneMap['navbar'];
   const hero = zoneMap['hero'];
-  const content = zoneMap['content'];
+  const contentZone = zoneMap['content'];
   const footer = zoneMap['footer'];
 
   // NAV
@@ -173,30 +173,47 @@ function buildSemanticFromZones(zones, pageKind, image) {
   </div>
 </nav>`;
 
-  // HERO
+  // HERO — use hero zone if exists, otherwise find large headings from content zone
   let heroHTML = '';
-  if (hero?.elements?.length) {
-    const heroBg = hero.bg || bg;
-    const headings = hero.elements.filter(e => e.role === 'heading');
-    const subheadings = hero.elements.filter(e => e.role === 'subheading');
-    const bodyEls = hero.elements.filter(e => e.role === 'body' || e.role === 'cta-label');
-    const heroBtns = hero.elements.filter(e => e.role === 'button');
+  const heroZone = zoneMap['hero'];
+
+  // Collect hero elements: from hero zone OR large headings from content zone
+  let heroEls = heroZone?.elements || [];
+  let promotedHeadings = [];
+  if (!heroEls.length && contentZone?.elements?.length) {
+    // Promote large headings from content to hero
+    promotedHeadings = contentZone.elements.filter(e => e.font_size >= 48 || (e.font_size >= 28 && e.font_weight >= 700));
+    heroEls = promotedHeadings;
+  }
+
+  if (heroEls.length) {
+    const heroBg = heroZone?.bg || contentZone?.bg || bg;
+    const headings = heroEls.filter(e => e.role === 'heading' || e.font_size >= 48 || (e.font_size >= 28 && e.font_weight >= 700));
+    const subheadings = heroEls.filter(e => !headings.includes(e) && (e.role === 'subheading' || e.font_size >= 18));
+    const bodyEls = heroEls.filter(e => !headings.includes(e) && !subheadings.includes(e));
+    const heroBtns = heroEls.filter(e => e.role === 'button');
 
     heroHTML = `<section style="background:${heroBg};padding:4rem 2rem;display:flex;flex-direction:column;align-items:center;text-align:center;gap:1.25rem;">
-  ${headings.map(e => `<h1 style="color:${e.color};font-size:clamp(2.5rem,6vw,${e.font_size}px);font-weight:${e.font_weight||800};line-height:1.1;letter-spacing:-0.02em;margin:0;">${esc(e.text)}</h1>`).join('')}
-  ${subheadings.map(e => `<h2 style="color:${e.color};font-size:clamp(1.1rem,2.5vw,${e.font_size}px);font-weight:${e.font_weight||600};line-height:1.3;margin:0;max-width:700px;">${esc(e.text)}</h2>`).join('')}
-  ${bodyEls.map(e => `<p style="color:${e.color};font-size:${e.font_size||16}px;font-weight:${e.font_weight||400};line-height:1.6;margin:0;max-width:600px;">${esc(e.text)}</p>`).join('')}
+  ${headings.map(e => `<h1 style="color:${e.color};font-size:${e.font_size}px;font-weight:${e.font_weight||800};line-height:1.1;letter-spacing:-0.02em;margin:0;">${esc(e.text)}</h1>`).join('')}
+  ${subheadings.map(e => `<h2 style="color:${e.color};font-size:${e.font_size}px;font-weight:${e.font_weight||600};line-height:1.3;margin:0;max-width:700px;">${esc(e.text)}</h2>`).join('')}
+  ${bodyEls.map(e => `<p style="color:${e.color};font-size:${e.font_size||16}px;line-height:1.6;margin:0;max-width:600px;">${esc(e.text)}</p>`).join('')}
   ${heroBtns.length ? `<div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:0.5rem;">${heroBtns.map(e => `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||50}px;padding:14px 32px;font-size:16px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}</div>` : ''}
 </section>`;
   }
 
+  // Remove promoted headings from content zone so they don't render twice
+  const contentZoneRef = contentZone;
+  if (contentZoneRef && promotedHeadings.length) {
+    contentZoneRef.elements = contentZoneRef.elements.filter(e => !promotedHeadings.includes(e));
+  }
+
   // CONTENT
   let contentHTML = '';
-  if (content?.elements?.length) {
-    const contentBg = content.bg || bg;
-    const midX = 0.65; // sidebar split
-    const mainEls = content.elements.filter(e => (e.x_pct || 0) < midX);
-    const sideEls = content.elements.filter(e => (e.x_pct || 0) >= midX);
+  if (contentZoneRef?.elements?.length) {
+    const contentBg = contentZoneRef.bg || bg;
+    const midX = 0.65;
+    const mainEls = contentZoneRef.elements.filter(e => (e.x_pct || 0) < midX);
+    const sideEls = contentZoneRef.elements.filter(e => (e.x_pct || 0) >= midX);
 
     const renderEl = (e) => {
       if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:6px 16px;font-size:${e.font_size||13}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
