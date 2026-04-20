@@ -1,5 +1,9 @@
+import { useState } from "react";
+import Logo from "./Logo";
+import { ArrowLeft, Loader2 } from "lucide-react";
+
 const GoogleIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 18 18">
+  <svg width="17" height="17" viewBox="0 0 18 18" aria-hidden="true">
     <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
     <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
     <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"/>
@@ -8,60 +12,101 @@ const GoogleIcon = () => (
 );
 
 export default function LoginScreen({ onLogin, onBack, error }) {
+  const [signingIn, setSigningIn] = useState(false);
+
+  const handleLogin = async () => {
+    setSigningIn(true);
+    await onLogin();
+    setSigningIn(false);
+  };
+
   return (
     <div style={{
-      position: "relative", zIndex: 10, display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", height: "100%",
-      color: "#1c1e21", gap: "1.5rem"
+      height: "100vh", background: "var(--bg)",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      position: "relative", padding: "1.5rem"
     }}>
-      <div style={{
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)",
-        borderRadius: "16px", padding: "2.5rem 3rem", border: "1px solid #dddfe2",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.08)", display: "flex",
-        flexDirection: "column", alignItems: "center", gap: "1.5rem", minWidth: "320px"
-      }}>
-        <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1877f2" }}>Welcome back</div>
-        <div style={{ fontSize: "0.9rem", color: "#606770", textAlign: "center" }}>
-          Sign in to start converting screenshots to code
+      <div style={{ width: "100%", maxWidth: 400, animation: "fadeUp 0.4s ease" }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: "2rem" }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14, margin: "0 auto 1.1rem",
+            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 8px 28px rgba(99,102,241,0.35)"
+          }}>
+            <Logo size="icon" />
+          </div>
+          <h1 style={{
+            margin: 0, fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.02em",
+            background: "linear-gradient(135deg, #f1f5f9, #a5b4fc)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent"
+          }}>Welcome back</h1>
+          <p style={{ margin: "0.5rem 0 0", color: "var(--text-muted)", fontSize: "0.88rem" }}>
+            Sign in to start converting screenshots to code
+          </p>
         </div>
 
-        {error && (
-          <div style={{
-            padding: "0.75rem 1rem", borderRadius: "8px",
-            background: "#fff0f0", border: "1px solid #ffcdd2",
-            color: "#c62828", fontSize: "0.85rem", width: "100%", textAlign: "center"
-          }}>
-            {error}
-          </div>
-        )}
+        {/* Card */}
+        <div style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 16, padding: "2rem",
+          backdropFilter: "blur(20px)"
+        }}>
+          {error && (
+            <div
+              role="alert"
+              aria-live="assertive"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "0.75rem 1rem", borderRadius: 8, marginBottom: "1.25rem",
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
+                color: "#fca5a5", fontSize: "0.83rem"
+              }}
+            >
+              <span aria-hidden="true">⚠</span> {error}
+            </div>
+          )}
 
-        <button
-          onClick={onLogin}
-          style={{
-            padding: "0.85rem 2rem", borderRadius: "8px", border: "1px solid #dddfe2",
-            background: "#ffffff", color: "#1c1e21", fontSize: "0.95rem",
-            fontWeight: 600, cursor: "pointer", transition: "all 0.3s",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)", width: "100%"
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; e.currentTarget.style.background = "#f8f9fa"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)"; e.currentTarget.style.background = "#ffffff"; }}
-        >
-          <GoogleIcon />
-          Sign in with Google
-        </button>
+          <button
+            onClick={handleLogin}
+            disabled={signingIn}
+            aria-label="Continue with Google"
+            style={{
+              width: "100%", padding: "0.85rem 1.5rem", borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.06)",
+              color: "var(--text-primary)", fontSize: "0.92rem", fontWeight: 600,
+              cursor: signingIn ? "not-allowed" : "pointer", transition: "all 0.2s",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              fontFamily: "inherit", opacity: signingIn ? 0.7 : 1
+            }}
+            onMouseEnter={e => { if (!signingIn) { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"; }}}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+          >
+            {signingIn
+              ? <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Signing in…</>
+              : <><GoogleIcon /> Continue with Google</>
+            }
+          </button>
+
+          <p style={{
+            margin: "1.25rem 0 0", textAlign: "center",
+            fontSize: "0.75rem", color: "var(--text-faint)", lineHeight: 1.6
+          }}>
+            By signing in you agree to our{" "}
+            <span style={{ color: "var(--text-muted)", textDecoration: "underline", cursor: "pointer" }}>Terms of Service</span>
+          </p>
+        </div>
 
         <button
           onClick={onBack}
-          style={{
-            background: "none", border: "none", color: "#1877f2",
-            cursor: "pointer", fontSize: "0.9rem",
-            transition: "color 0.2s", padding: 0
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.color = "#166fe5"}
-          onMouseLeave={(e) => e.currentTarget.style.color = "#1877f2"}
+          className="btn-ghost"
+          style={{ display: "flex", margin: "1.25rem auto 0", border: "none", background: "none", fontSize: "0.85rem" }}
         >
-          ← Back to home
+          <ArrowLeft size={14} /> Back to home
         </button>
       </div>
     </div>

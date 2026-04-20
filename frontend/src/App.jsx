@@ -4,9 +4,10 @@ import { auth, googleProvider } from "./firebase";
 import HomeScreen from "./components/HomeScreen";
 import LoginScreen from "./components/LoginScreen";
 import ChatScreen from "./components/ChatScreen";
+import ToastContainer from "./components/Toast";
 
 export default function App() {
-  const [screen, setScreen] = useState("home"); // "home" | "login" | "chat"
+  const [screen, setScreen] = useState("home");
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState("");
 
@@ -16,45 +17,39 @@ export default function App() {
       const result = await signInWithPopup(auth, googleProvider);
       setUser(result.user);
       setScreen("chat");
-    } catch (error) {
-      console.error("Login error:", error);
+    } catch {
       setLoginError("Sign-in failed. Please try again.");
     }
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch {
-      // ignore
-    }
+    try { await signOut(auth); } catch { /* ignore */ }
     setUser(null);
     setScreen("home");
   };
 
   return (
-    <div style={{
-      width: "100vw", height: "100vh", background: "#f0f2f5",
-      position: "relative", overflow: "hidden",
-      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
-    }}>
+    <>
+      {/* Single persistent ambient glow */}
+      <div aria-hidden="true" style={{
+        position: "fixed", top: "-10%", left: "50%", transform: "translateX(-50%)",
+        width: 800, height: 600, borderRadius: "50%", pointerEvents: "none", zIndex: 0,
+        background: "radial-gradient(ellipse, rgba(99,102,241,0.1) 0%, transparent 65%)"
+      }} />
 
+      <div style={{ position: "relative", zIndex: 1, height: "100vh", overflow: screen === "home" ? "auto" : "hidden" }}>
+        {screen === "home" && <HomeScreen onGetStarted={() => setScreen("login")} />}
+        {screen === "login" && (
+          <LoginScreen
+            onLogin={handleGoogleLogin}
+            onBack={() => { setLoginError(""); setScreen("home"); }}
+            error={loginError}
+          />
+        )}
+        {screen === "chat" && user && <ChatScreen user={user} onLogout={handleLogout} />}
+      </div>
 
-      {screen === "home" && (
-        <HomeScreen onGetStarted={() => setScreen("login")} />
-      )}
-
-      {screen === "login" && (
-        <LoginScreen
-          onLogin={handleGoogleLogin}
-          onBack={() => { setLoginError(""); setScreen("home"); }}
-          error={loginError}
-        />
-      )}
-
-      {screen === "chat" && user && (
-        <ChatScreen user={user} onLogout={handleLogout} />
-      )}
-    </div>
+      <ToastContainer />
+    </>
   );
 }
