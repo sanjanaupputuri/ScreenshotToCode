@@ -201,7 +201,14 @@ async function populateInitialData() {
   const spacingCount = (await get('SELECT COUNT(*) as c FROM spacing'))?.c ?? 0;
   const missingProfileTemplates = (await get('SELECT COUNT(*) as c FROM primitive_profiles WHERE html_template IS NULL'))?.c ?? 0;
 
-  if (componentCount > 0 && primitiveProfileCount > 0 && colorCount > 0 && spacingCount > 0 && missingProfileTemplates === 0) return;
+  // Always run to insert new profiles/colors/spacing added in updates (INSERT OR IGNORE is safe)
+  const needsFullInit = componentCount === 0 || primitiveProfileCount === 0 || colorCount === 0 || spacingCount === 0;
+  const needsTemplateUpdate = missingProfileTemplates > 0;
+  // Check if new profiles from the expanded library are missing
+  const hasNewProfiles = (await get("SELECT COUNT(*) as c FROM primitive_profiles WHERE name IN ('cta_button','sticky_navbar','feature_card','sidebar_panel','hero_section','footer_panel','active_filter_pill','toggle_switch_on','tab_bar')"))?.c ?? 0;
+  const needsNewProfiles = hasNewProfiles < 9;
+
+  if (!needsFullInit && !needsTemplateUpdate && !needsNewProfiles) return;
 
   const components = [
     [1, 'button_primary', 'form', '<button class="{{classes}}">{{text}}</button>', '', 'Primary button'],
@@ -244,33 +251,78 @@ async function populateInitialData() {
     ['#000000', 'bg-black text-white', 'neutral', 'Black'],
     ['#1877F2', 'bg-blue-600 text-white', 'primary', 'Facebook Blue'],
     ['#F3F4F6', 'bg-gray-100', 'neutral', 'Light Gray'],
+    // Extended palette for better color reproduction
+    ['#0969da', 'bg-blue-600 text-white', 'primary', 'GitHub Blue'],
+    ['#1f883d', 'bg-green-700 text-white', 'success', 'GitHub Green'],
+    ['#cf222e', 'bg-red-700 text-white', 'danger', 'GitHub Red'],
+    ['#9a6700', 'bg-yellow-700 text-white', 'warning', 'GitHub Yellow'],
+    ['#6e40c9', 'bg-purple-600 text-white', 'accent', 'Purple'],
+    ['#0891b2', 'bg-cyan-600 text-white', 'primary', 'Cyan'],
+    ['#f97316', 'bg-orange-500 text-white', 'warning', 'Orange'],
+    ['#ec4899', 'bg-pink-500 text-white', 'accent', 'Pink'],
+    ['#14b8a6', 'bg-teal-500 text-white', 'success', 'Teal'],
+    ['#8b5cf6', 'bg-violet-500 text-white', 'accent', 'Violet'],
+    ['#f1f5f9', 'bg-slate-100', 'neutral', 'Slate 100'],
+    ['#e2e8f0', 'bg-slate-200', 'neutral', 'Slate 200'],
+    ['#94a3b8', 'bg-slate-400', 'neutral', 'Slate 400'],
+    ['#475569', 'bg-slate-600 text-white', 'neutral', 'Slate 600'],
+    ['#1e293b', 'bg-slate-800 text-white', 'neutral', 'Slate 800'],
+    ['#0f172a', 'bg-slate-900 text-white', 'neutral', 'Slate 900'],
+    ['#f6f8fa', 'bg-gray-50', 'neutral', 'GitHub Surface'],
+    ['#24292f', 'bg-gray-900 text-white', 'neutral', 'GitHub Dark'],
+    ['#161b22', 'bg-gray-950 text-white', 'neutral', 'GitHub Darker'],
+    ['#30363d', 'bg-gray-800 text-white', 'neutral', 'GitHub Border Dark'],
+    ['#d0d7de', 'border-gray-300', 'neutral', 'GitHub Border Light'],
   ];
 
   const spacing = [
-    [4, 'p-1', 0.25, 'padding'], [8, 'p-2', 0.5, 'padding'],
-    [12, 'p-3', 0.75, 'padding'], [16, 'p-4', 1.0, 'padding'],
+    [2, 'p-0.5', 0.125, 'padding'], [4, 'p-1', 0.25, 'padding'],
+    [6, 'p-1.5', 0.375, 'padding'], [8, 'p-2', 0.5, 'padding'],
+    [10, 'p-2.5', 0.625, 'padding'], [12, 'p-3', 0.75, 'padding'],
+    [14, 'p-3.5', 0.875, 'padding'], [16, 'p-4', 1.0, 'padding'],
     [20, 'p-5', 1.25, 'padding'], [24, 'p-6', 1.5, 'padding'],
-    [32, 'p-8', 2.0, 'padding'], [48, 'p-12', 3.0, 'padding'],
+    [28, 'p-7', 1.75, 'padding'], [32, 'p-8', 2.0, 'padding'],
+    [36, 'p-9', 2.25, 'padding'], [40, 'p-10', 2.5, 'padding'],
+    [48, 'p-12', 3.0, 'padding'], [56, 'p-14', 3.5, 'padding'],
+    [64, 'p-16', 4.0, 'padding'], [80, 'p-20', 5.0, 'padding'],
+    [96, 'p-24', 6.0, 'padding'],
+    // gap values
+    [4, 'gap-1', 0.25, 'gap'], [8, 'gap-2', 0.5, 'gap'],
+    [12, 'gap-3', 0.75, 'gap'], [16, 'gap-4', 1.0, 'gap'],
+    [20, 'gap-5', 1.25, 'gap'], [24, 'gap-6', 1.5, 'gap'],
+    [32, 'gap-8', 2.0, 'gap'], [40, 'gap-10', 2.5, 'gap'],
+    [48, 'gap-12', 3.0, 'gap'],
   ];
 
   const primitiveProfiles = [
     // shape profiles — [name, base_kind, target_type, min_aspect, max_aspect, min_w, max_w, min_h, max_h, text_pattern, fill_mode, border_radius_tier, z_index, priority, text_role, description]
     ['page_toolbar',      'shape', 'toolbar', 4.0, 80.0, 300, 5000, 24, 96,  null, 'filled',   'none',   4, 9, 'chrome',    'Top browser or app toolbar'],
-    ['filled_button',     'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'filled',   'small',  12, 8, 'action',   'Filled primary action button'],
-    ['outline_button',    'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'outlined', 'small',  12, 7, 'action',   'Secondary outlined button'],
-    ['ghost_button',      'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'any',      'none',   11, 6, 'action',   'Ghost/text-only button'],
-    ['pill_button',       'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'filled',   'full',   12, 8, 'action',   'Pill-shaped CTA button'],
+    ['sticky_navbar',     'shape', 'toolbar', 5.0, 80.0, 400, 5000, 48, 80,  null, 'any',      'none',   4, 9, 'chrome',    'Sticky navigation bar'],
+    ['toggle_switch_on',  'shape', 'toggle',  1.5, 3.0,  28,  80,   14, 32,  null, 'filled',   'full',   11, 10, 'toggle',   'Toggle switch (on state)'],
+    ['toggle_switch_off', 'shape', 'toggle',  1.5, 3.0,  28,  80,   14, 32,  null, 'outlined', 'full',   11, 9, 'toggle',   'Toggle switch (off state)'],
+    ['filled_button',     'shape', 'button',  2.2, 12.0, 50,  420,  28, 72,  null, 'filled',   'small',  12, 8, 'action',   'Filled primary action button'],
+    ['outline_button',    'shape', 'button',  2.2, 12.0, 50,  420,  28, 72,  null, 'outlined', 'small',  12, 7, 'action',   'Secondary outlined button'],
+    ['ghost_button',      'shape', 'button',  2.2, 12.0, 50,  420,  28, 72,  null, 'any',      'none',   11, 6, 'action',   'Ghost/text-only button'],
+    ['pill_button',       'shape', 'button',  2.2, 12.0, 50,  420,  28, 72,  null, 'filled',   'full',   12, 8, 'action',   'Pill-shaped CTA button'],
+    ['cta_button',        'shape', 'button',  2.0, 8.0,  80,  360,  40, 80,  '(get started|sign up|try|learn more|start|join|subscribe|download|buy|shop)', 'filled', 'medium', 12, 9, 'cta', 'CTA button with subtitle'],
     ['icon_button',       'shape', 'button',  0.7, 1.3,  20,  60,   20, 60,  null, 'any',      'any',    12, 7, 'icon',     'Square icon-only button'],
     ['border_input',      'shape', 'input',   2.5, 24.0, 80,  1200, 20, 72,  null, 'outlined', 'small',  11, 8, 'field',    'Outlined input field'],
     ['search_input',      'shape', 'input',   3.0, 30.0, 120, 1200, 28, 60,  '(search|find|query)', 'outlined', 'small', 11, 9, 'field', 'Search input with icon'],
+    ['search_input_icon', 'shape', 'input',   3.0, 30.0, 120, 1200, 28, 60,  null, 'outlined', 'medium', 11, 8, 'field',    'Search input with icon inside'],
     ['tab_chip',          'shape', 'chip',    1.5, 12.0, 24,  400,  16, 56,  null, 'outlined', 'medium', 10, 7, 'tab',      'Tab, filter, or chip'],
     ['pill_chip',         'shape', 'chip',    1.5, 12.0, 24,  400,  16, 40,  null, 'any',      'full',   10, 7, 'badge',    'Pill badge or label'],
+    ['active_filter_pill','shape', 'chip',    1.5, 10.0, 24,  300,  16, 40,  null, 'filled',   'full',   10, 8, 'filter',   'Active filter pill (filled)'],
+    ['inactive_filter_pill','shape','chip',   1.5, 10.0, 24,  300,  16, 40,  null, 'outlined', 'full',   10, 7, 'filter',   'Inactive filter pill (outlined)'],
     ['select_dropdown',   'shape', 'select',  1.5, 10.0, 40,  400,  18, 48,  null, 'any',      'small',  11, 8, 'select',   'Dropdown selector'],
-    ['toggle_switch',     'shape', 'toggle',  1.5, 3.0,  28,  80,   14, 32,  null, 'filled',   'full',   11, 8, 'toggle',   'Toggle switch'],
+    ['tab_bar',           'shape', 'toolbar', 3.0, 80.0, 200, 5000, 36, 60,  '(home|explore|search|profile|settings|feed|notifications)', 'any', 'none', 5, 8, 'tab-bar', 'Tab bar navigation'],
     ['icon_glyph',        'shape', 'icon',    0.65,1.35, 8,   80,   8,  80,  null, 'any',      'any',    14, 8, 'icon',     'Icon glyph or badge'],
     ['avatar_circle',     'shape', 'avatar',  0.75,1.25, 20,  140,  20, 140, null, 'any',      'full',   15, 8, 'avatar',   'Avatar or circular marker'],
     ['card_container',    'shape', 'card',    0.5, 3.0,  100, 2000, 80, 1200,null, 'any',      'small',  6,  6, 'card',     'Card with multiple children'],
+    ['feature_card',      'shape', 'card',    0.6, 2.0,  160, 600,  120, 400,null, 'any',      'medium', 6,  7, 'card',     'Feature card (icon+title+desc)'],
     ['panel_container',   'shape', 'panel',   0.4, 50.0, 40,  5000, 24, 3000,null, 'any',      'any',    6,  5, 'container','Layout container'],
+    ['sidebar_panel',     'shape', 'panel',   0.1, 0.6,  120, 400,  200, 3000,null,'any',      'none',   4,  7, 'sidebar',  'Sidebar panel'],
+    ['hero_section',      'shape', 'panel',   2.0, 20.0, 400, 5000, 200, 800,null, 'any',      'none',   3,  6, 'hero',     'Hero/banner section'],
+    ['footer_panel',      'shape', 'panel',   3.0, 80.0, 400, 5000, 60, 400, null, 'any',      'none',   3,  6, 'footer',   'Footer with columns'],
     ['divider_line',      'shape', 'divider', 5.0, 9999, 100, 9999, 1,  4,   null, 'any',      'none',   2,  9, 'divider',  'Horizontal divider line'],
     // text profiles
     ['display_heading',   'text', 'display_heading', 1.0, 40.0, 80, 2400, 48, 200, null, 'any', 'any', 30, 10, 'display',  'Large display heading'],
@@ -290,18 +342,29 @@ async function populateInitialData() {
     ['outline_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
     ['ghost_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
     ['pill_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['cta_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
     ['icon_button', '<button type="button" style="{{style}}" aria-label="{{text}}"></button>', null],
     ['border_input', '<input type="text" placeholder="{{text}}" readonly style="{{style}}" />', null],
     ['search_input', '<input type="search" placeholder="{{text}}" readonly style="{{style}}" />', null],
+    ['search_input_icon', '<input type="search" placeholder="{{text}}" readonly style="{{style}}" />', null],
     ['select_dropdown', '<select style="{{style}}"><option>{{text}}</option></select>', null],
     ['tab_chip', '<div style="{{style}}">{{text}}</div>', null],
     ['pill_chip', '<div style="{{style}}">{{text}}</div>', null],
-    ['toggle_switch', '<button type="button" style="{{style}}" aria-pressed="false"></button>', null],
+    ['active_filter_pill', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['inactive_filter_pill', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['toggle_switch_on', '<button type="button" style="{{style}}" aria-pressed="true"></button>', null],
+    ['toggle_switch_off', '<button type="button" style="{{style}}" aria-pressed="false"></button>', null],
+    ['tab_bar', '<nav style="{{style}}">{{content}}</nav>', null],
     ['divider_line', '<div style="{{style}}"></div>', null],
     ['card_container', '<div style="{{style}}">{{content}}</div>', null],
+    ['feature_card', '<div style="{{style}}">{{content}}</div>', null],
     ['panel_container', '<div style="{{style}}">{{content}}</div>', null],
+    ['sidebar_panel', '<aside style="{{style}}">{{content}}</aside>', null],
+    ['hero_section', '<section style="{{style}}">{{content}}</section>', null],
+    ['footer_panel', '<footer style="{{style}}">{{content}}</footer>', null],
     ['icon_glyph', '<div style="{{style}}" aria-hidden="true"></div>', null],
     ['avatar_circle', '<div style="{{style}}" aria-hidden="true"></div>', null],
+    ['sticky_navbar', '<nav style="{{style}}">{{content}}</nav>', null],
     ['display_heading', '<div style="{{style}}">{{text}}</div>', null],
     ['repo_title', '<div style="{{style}}">{{text}}</div>', null],
     ['section_heading', '<div style="{{style}}">{{text}}</div>', null],

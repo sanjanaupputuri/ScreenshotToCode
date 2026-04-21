@@ -85,12 +85,16 @@ function normalizeElement(raw, index) {
   const border = Number(raw.border_width) > 0 && !isTransparent(raw.border_color)
     ? `${Math.round(raw.border_width)}px solid ${raw.border_color}`
     : 'none';
+  const rawFontSize = Number(raw.font_size) || 14;
   const fontSize =
-    textRole === 'title' ? Math.max(Number(raw.font_size) || 14, 18) :
-    textRole === 'muted' ? Math.max(11, (Number(raw.font_size) || 12) - 1) :
-    Number(raw.font_size) || 14;
+    textRole === 'title' ? Math.max(rawFontSize, 24) :
+    textRole === 'heading' ? Math.max(rawFontSize, 18) :
+    textRole === 'muted' ? Math.max(11, rawFontSize - 2) :
+    rawFontSize > 20 ? rawFontSize : // Preserve large text
+    rawFontSize;
   const fontWeight =
     textRole === 'title' ? Math.max(Number(raw.font_weight) || 600, 700) :
+    textRole === 'heading' ? Math.max(Number(raw.font_weight) || 600, 600) :
     textRole === 'nav' ? Math.max(Number(raw.font_weight) || 500, 600) :
     Number(raw.font_weight) || 400;
   const textColor =
@@ -828,6 +832,23 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
   const inlineText = inlineSelection.text;
   const inlineTextNode = inlineSelection.node;
 
+  // Toggle switch
+  if (element.semanticType === 'toggle' || element.type === 'toggle') {
+    const isOn = !isTransparent(element.background);
+    return `<button type="button" aria-pressed="${isOn}" style="${styleString({
+      position: 'absolute',
+      left: px(element.x),
+      top: px(element.y),
+      width: px(element.width),
+      height: px(element.height),
+      background: element.background,
+      border: element.border,
+      'border-radius': px(element.borderRadius),
+      'z-index': element.zIndex,
+      cursor: 'pointer',
+    })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="toggle"></button>`;
+  }
+
   // Select / dropdown
   if (element.semanticType === 'select' || element.type === 'select') {
     const label = inlineText || element.text || '';
@@ -836,6 +857,11 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
   }
 
   if (children.length === 0) {
+    // Large panels/shapes with no children and no text are likely image regions
+    const isLargeImageRegion = element.width > 100 && element.height > 80
+      && (element.semanticType === 'panel' || element.type === 'panel')
+      && !isTransparent(element.background);
+    if (isLargeImageRegion) return renderImagePlaceholder(element);
     const isTransparentShape = (element.type === 'shape' || element.semanticType === 'shape')
       && isTransparent(element.background)
       && element.border === 'none';
@@ -858,7 +884,8 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
 
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
     const textColor = inlineTextNode?.textColor || element.textColor || '#111827';
-    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.34));
+    // Cap button font size more aggressively - use actual text node fontSize if available
+    const fontSize = inlineTextNode?.fontSize || Math.min(14, Math.max(11, Math.round(element.height * 0.28)));
     const fontWeight = inlineTextNode?.fontWeight || 600;
     const bg = element.background;
     const finalTextColor = (!isTransparent(bg) && (contrastRatio(textColor, bg) < 1.5 || colorDistance(textColor, bg) < 30))
@@ -884,14 +911,14 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
       }
     }
     if (!label || label.trim().length === 0) return '';
-    const fontSize = Math.max(11, Math.round(element.height * 0.34));
+    const fontSize = Math.min(14, Math.max(10, Math.round(element.height * 0.28)));
     const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;
     return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
   }
 
   if (element.semanticType === 'input' && inlineText) {
     const textColor = inlineTextNode?.textColor || '#6b7280';
-    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.3));
+    const fontSize = inlineTextNode?.fontSize || Math.min(16, Math.max(11, Math.round(element.height * 0.28)));
     const fontWeight = inlineTextNode?.fontWeight || 400;
     return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText);
   }
@@ -1098,10 +1125,17 @@ export class ComponentService {
 
     const sorted = [...elements].sort((a, b) => (a.y - b.y) || (a.x - b.x));
 
-    // Band detection by y position
-    const navH = imgH * 0.12;
-    const tabH = imgH * 0.20;
-    const headerH = imgH * 0.30;
+    // Adaptive band detection - find actual nav/header positions
+    const toolbars = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'toolbar');
+    const firstToolbar = toolbars.find(t => t.y < imgH * 0.15);
+    const navH = firstToolbar ? (firstToolbar.y + firstToolbar.height + 10) : imgH * 0.12;
+    
+    // Find first large text (likely a heading) to determine header end
+    const largeTexts = sorted.filter(e => e.kind === 'text' && e.height > 20);
+    const firstHeading = largeTexts.find(t => t.y > navH);
+    const headerH = firstHeading ? Math.min(firstHeading.y + firstHeading.height + 40, imgH * 0.35) : imgH * 0.30;
+    
+    const tabH = navH + (headerH - navH) * 0.3;
     const footerY = imgH * 0.85;
 
     const navTexts = sorted.filter(e => e.kind === 'text' && e.y < navH);
@@ -1111,14 +1145,29 @@ export class ComponentService {
     const footerTexts = sorted.filter(e => e.kind === 'text' && e.y >= footerY);
     const buttons = sorted.filter(e => e.kind === 'shape' && (e.semanticType === 'button' || e.semanticType === 'chip') && e.text);
     const inputs = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'input');
+    const toggles = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'toggle');
 
     const navBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y < navH)?.background || (isDark ? '#1c1a2a' : '#24292f');
     const tabBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y >= navH && e.y < tabH)?.background || bodyBg;
 
     const esc = escapeHtml;
     const col = (e) => e.textColor || textColor;
-    const fs = (e, min = 12) => `${Math.max(min, e.fontSize || 14)}px`;
+    // Use actual fontSize from element, with fallback to height-based calculation
+    const fs = (e, min = 12) => {
+      // Prefer actual detected fontSize over height-based calculation
+      if (e.fontSize && e.fontSize > 14) {
+        return `${Math.round(e.fontSize)}px`;
+      }
+      const fromHeight = e.height ? Math.round(e.height * 0.72) : 0;
+      const baseSize = fromHeight || e.fontSize || 14;
+      // Scale up large headings properly
+      if (baseSize > 24) return `${Math.round(baseSize * 1.2)}px`;
+      if (baseSize > 18) return `${Math.round(baseSize * 1.1)}px`;
+      return `${Math.max(min, baseSize)}px`;
+    };
     const fw = (e) => e.fontWeight || 400;
+    // Derive button height from element height
+    const btnH = (e) => e.height ? `${e.height}px` : '32px';
 
     // NAV
     const logoEl = navTexts.sort((a,b) => a.x - b.x)[0];
@@ -1128,10 +1177,10 @@ export class ComponentService {
 
     const navHTML = `<nav style="background:${navBg};display:flex;align-items:center;padding:0 1.5rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.2);">
   ${logoEl ? `<span style="color:${col(logoEl)};font-size:${fs(logoEl,16)};font-weight:700;white-space:nowrap;">${esc(logoEl.text)}</span>` : ''}
-  ${navInputEls.map(e => `<input placeholder="${esc(e.text||'Search')}" style="background:${e.background};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 10px;font-size:13px;color:${col(e)};outline:none;width:200px;" />`).join('')}
+  ${navInputEls.map(e => `<input placeholder="${esc(e.text||'Search')}" style="background:${e.background};border:${e.border};border-radius:${e.borderRadius}px;padding:0 10px;height:${btnH(e)};font-size:${fs(e,13)};color:${col(e)};outline:none;width:200px;" />`).join('')}
   <div style="display:flex;align-items:center;gap:0.25rem;margin-left:auto;">
     ${navLinkEls.map(e => `<a href="#" style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};padding:5px 10px;text-decoration:none;white-space:nowrap;">${esc(e.text)}</a>`).join('')}
-    ${navBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:6px 14px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+    ${navBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:0 14px;height:${btnH(e)};font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </nav>`;
 
@@ -1145,7 +1194,7 @@ export class ComponentService {
     const headerHTML = (headerTexts.length || headerBtnEls.length) ? `<div style="display:flex;align-items:center;gap:0.75rem;padding:1rem 1.5rem;flex-wrap:wrap;border-bottom:1px solid #d0d7de;">
   ${headerTexts.sort((a,b)=>a.x-b.x).map(e => `<span style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};white-space:nowrap;">${esc(e.text)}</span>`).join('')}
   <div style="margin-left:auto;display:flex;gap:0.5rem;flex-wrap:wrap;">
-    ${headerBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 12px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+    ${headerBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:0 12px;height:${btnH(e)};font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </div>` : '';
 
@@ -1155,28 +1204,48 @@ export class ComponentService {
     const rightTexts = bodyTexts.filter(e => e.x >= midX);
     const bodyBtnEls = buttons.filter(e => e.y >= headerH && e.y < footerY);
     const bodyInputEls = inputs.filter(e => e.y >= headerH && e.y < footerY);
+    const bodyToggleEls = toggles.filter(e => e.y >= headerH && e.y < footerY);
 
     // Group left texts into rows — use element height as tolerance (60% overlap needed)
     const rows = [];
-    for (const el of [...leftTexts, ...bodyBtnEls.filter(e=>e.x<midX), ...bodyInputEls.filter(e=>e.x<midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x))) {
+    for (const el of [...leftTexts, ...bodyBtnEls.filter(e=>e.x<midX), ...bodyInputEls.filter(e=>e.x<midX), ...bodyToggleEls.filter(e=>e.x<midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x))) {
       const elH = el.height || 14;
       const row = rows.find(r => Math.abs(r.y - el.y) < elH * 0.6);
-      if (row) row.items.push(el);
-      else rows.push({ y: el.y, items: [el] });
+      if (row) {
+        row.items.push(el);
+      } else {
+        // Calculate spacing from previous row
+        const prevRow = rows[rows.length - 1];
+        const spacingTop = prevRow ? Math.max(0, el.y - (prevRow.y + (prevRow.maxHeight || 14))) : 0;
+        rows.push({ y: el.y, items: [el], spacingTop, maxHeight: elH });
+      }
+      // Update max height for the row
+      const currentRow = rows[rows.length - 1];
+      if (currentRow && elH > (currentRow.maxHeight || 0)) {
+        currentRow.maxHeight = elH;
+      }
     }
 
     const renderItem = (el) => {
       if (el.kind === 'text') return `<span style="color:${col(el)};font-size:${fs(el,12)};font-weight:${fw(el)};">${esc(el.text)}</span>`;
-      if (el.semanticType === 'input') return `<input placeholder="${esc(el.text||'')}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;padding:4px 8px;font-size:${fs(el,12)};color:${col(el)};outline:none;" />`;
-      return `<button style="background:${el.background};color:${el.textColor||bestContrastText(el.background)};border:${el.border};border-radius:${el.borderRadius}px;padding:5px 12px;font-size:${fs(el,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(el.text)}</button>`;
+      if (el.semanticType === 'input') return `<input placeholder="${esc(el.text||'')}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;padding:0 8px;height:${btnH(el)};font-size:${fs(el,12)};color:${col(el)};outline:none;" />`;
+      if (el.semanticType === 'toggle') {
+        const isOn = !isTransparent(el.background);
+        return `<button type="button" aria-pressed="${isOn}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;width:${el.width}px;height:${el.height}px;cursor:pointer;"></button>`;
+      }
+      return `<button style="background:${el.background};color:${el.textColor||bestContrastText(el.background)};border:${el.border};border-radius:${el.borderRadius}px;padding:0 12px;height:${btnH(el)};font-size:${fs(el,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(el.text)}</button>`;
     };
 
     const mainHTML = `<div style="display:flex;gap:1.5rem;padding:1rem 1.5rem;max-width:1280px;margin:0 auto;">
   <div style="flex:1;min-width:0;">
-    ${rows.map(row => `<div style="display:flex;align-items:center;gap:0.75rem;padding:6px 0;flex-wrap:wrap;">${row.items.sort((a,b)=>a.x-b.x).map(renderItem).join('')}</div>`).join('\n    ')}
+    ${rows.map(row => {
+      const gap = row.items.reduce((m, e) => Math.max(m, e.spacingRight || 0), 0);
+      const mt = row.spacingTop > 0 ? Math.min(row.spacingTop, 24) : 0;
+      return `<div style="display:flex;align-items:center;gap:${gap||12}px;margin-top:${mt}px;flex-wrap:wrap;">${row.items.sort((a,b)=>a.x-b.x).map(renderItem).join('')}</div>`;
+    }).join('\n    ')}
   </div>
   ${rightTexts.length ? `<div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem;">
-    ${[...rightTexts, ...bodyBtnEls.filter(e=>e.x>=midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x)).map(renderItem).join('\n    ')}
+    ${[...rightTexts, ...bodyBtnEls.filter(e=>e.x>=midX), ...bodyToggleEls.filter(e=>e.x>=midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x)).map(renderItem).join('\n    ')}
   </div>` : ''}
 </div>`;
 

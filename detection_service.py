@@ -1008,8 +1008,8 @@ def detect_shape_regions(image, text_regions, page_background):
         x, y, w, h = cv2.boundingRect(contour)
         area = w * h
         
-        # Button-sized colored regions
-        if area < min_area or w < 100 or h < 30:
+        # Button-sized colored regions (allow smaller for toggles/chips)
+        if area < min_area or w < 28 or h < 14:
             continue
         if w > width * 0.99 and h > height * 0.99:
             continue
@@ -1448,8 +1448,9 @@ def filter_regions(regions):
             y_overlap = max(0, min(region["y"] + region["height"], existing["y"] + existing["height"]) - max(region["y"], existing["y"]))
             overlap_area = x_overlap * y_overlap
             smaller = min(region["area"], existing["area"])
-            # Stricter overlap threshold: 55% instead of 65%
-            if smaller > 0 and overlap_area / smaller > 0.55 and region["kind"] == existing["kind"]:
+            # Stricter overlap threshold for inputs: 40% instead of 55%
+            threshold = 0.40 if (region.get("type") == "input" or existing.get("type") == "input") else 0.55
+            if smaller > 0 and overlap_area / smaller > threshold and region["kind"] == existing["kind"]:
                 duplicate = True
                 break
 
@@ -1971,6 +1972,104 @@ def align_text_row_baselines(elements):
             for element in group:
                 if abs(element["y"] - target_y) <= max(6, int(element["height"] * 0.5)):
                     element["y"] = target_y
+
+
+def detect_macro_layout(image, page_background):
+    """
+    Detect the overall layout type before micro-detection.
+    Returns one of: 'centered-single-column', 'sidebar-main', 'grid-cards', 'hero-content', 'generic'
+    Also returns structural zone hints: navbar_bottom, sidebar_x, hero_bottom.
+    """
+    height, width = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    page_bg_hex = hex_from_bgr(page_background)
+    page_luma = float(np.mean(page_background))
+
+    # Horizontal projection: find content rows
+    _, binary = cv2.threshold(gray, 240 if page_luma > 128 else 30, 255, cv2.THRESH_BINARY_INV if page_luma > 128 else cv2.THRESH_BINARY)
+    h_proj = np.sum(binary, axis=1).astype(np.float32)
+    h_proj_smooth = np.convolve(h_proj, np.ones(5)/5, mode='same')
+
+    # Vertical projection: find content columns
+    v_proj = np.sum(binary, axis=0).astype(np.float32)
+    v_proj_smooth = np.convolve(v_proj, np.ones(5)/5, mode='same')
+
+    # Detect sidebar: a vertical band on left/right with different background color
+    sidebar_x = None
+    left_band = image[:, :int(width * 0.28), :]
+    right_band = image[:, int(width * 0.72):, :]
+    main_band = image[:, int(width * 0.28):int(width * 0.72), :]
+
+    left_median = np.median(left_band.reshape(-1, 3), axis=0)
+    right_median = np.median(right_band.reshape(-1, 3), axis=0)
+    main_median = np.median(main_band.reshape(-1, 3), axis=0)
+
+    left_diff = float(np.linalg.norm(left_median - main_median))
+    right_diff = float(np.linalg.norm(right_median - main_median))
+
+    has_left_sidebar = left_diff > 18 and v_proj_smooth[:int(width * 0.28)].mean() > v_proj_smooth[int(width * 0.28):int(width * 0.72)].mean() * 0.3
+    has_right_sidebar = right_diff > 18 and v_proj_smooth[int(width * 0.72):].mean() > v_proj_smooth[int(width * 0.28):int(width * 0.72)].mean() * 0.3
+
+    if has_left_sidebar:
+        sidebar_x = int(width * 0.28)
+    elif has_right_sidebar:
+        sidebar_x = int(width * 0.72)
+
+    # Detect hero: large top section with big text (high h_proj values in top 40%)
+    hero_bottom = None
+    top_proj = h_proj_smooth[:int(height * 0.4)]
+    if len(top_proj) > 0:
+        # Find where content density drops significantly after a high-density region
+        max_density = float(top_proj.max())
+        if max_density > width * 0.05:
+            # Find the first significant gap after the dense region
+            for y in range(int(height * 0.15), int(height * 0.4)):
+                if h_proj_smooth[y] < max_density * 0.15:
+                    hero_bottom = y
+                    break
+
+    # Detect grid of cards: regular repeating pattern in content area
+    # Look for evenly-spaced vertical gaps in the content zone
+    content_start = int(height * 0.15)
+    content_proj = h_proj_smooth[content_start:]
+    gap_positions = []
+    in_gap = False
+    for i, val in enumerate(content_proj):
+        if val < width * 0.01 and not in_gap:
+            in_gap = True
+            gap_positions.append(content_start + i)
+        elif val >= width * 0.01:
+            in_gap = False
+
+    is_grid = False
+    if len(gap_positions) >= 3:
+        gaps = [gap_positions[i+1] - gap_positions[i] for i in range(len(gap_positions)-1)]
+        if gaps:
+            avg_gap = float(np.mean(gaps))
+            std_gap = float(np.std(gaps))
+            is_grid = std_gap < avg_gap * 0.35 and avg_gap > 20
+
+    # Determine layout type
+    if has_left_sidebar or has_right_sidebar:
+        layout_type = 'sidebar-main'
+    elif is_grid:
+        layout_type = 'grid-cards'
+    elif hero_bottom and hero_bottom > height * 0.2:
+        layout_type = 'hero-content'
+    else:
+        # Check if content is centered (most content in middle 60% of width)
+        center_density = float(v_proj_smooth[int(width*0.2):int(width*0.8)].mean())
+        edge_density = float(np.concatenate([v_proj_smooth[:int(width*0.2)], v_proj_smooth[int(width*0.8):]]).mean())
+        layout_type = 'centered-single-column' if center_density > edge_density * 1.5 else 'generic'
+
+    return {
+        'layout_type': layout_type,
+        'sidebar_x': sidebar_x,
+        'hero_bottom': hero_bottom,
+        'is_grid': is_grid,
+        'has_left_sidebar': has_left_sidebar,
+        'has_right_sidebar': has_right_sidebar,
+    }
 
 
 def detect_row_boundaries(image):
@@ -2530,6 +2629,9 @@ def detect_ui_elements(image_path, device_pixel_ratio=1.0):
     # T8: Extract full color inventory before detection
     color_inventory = extract_color_inventory(image, page_background)
 
+    # Macro layout detection: identify overall structure before micro-detection
+    macro_layout = detect_macro_layout(image, page_background)
+
     text_regions_base = detect_text_regions(image)
     shape_regions = detect_shape_regions(image, text_regions_base, page_background)
     text_regions = explode_long_text_lines(text_regions_base, shape_regions)
@@ -2605,7 +2707,7 @@ def detect_ui_elements(image_path, device_pixel_ratio=1.0):
     elements = fix_overlapping_text_zindex(elements)
 
     # Build structured zone analysis for high-quality HTML generation
-    zones = build_zone_analysis(elements, orig_w, orig_h, hex_from_bgr(page_background), color_inventory, col_bands)
+    zones = build_zone_analysis(elements, orig_w, orig_h, hex_from_bgr(page_background), color_inventory, col_bands, macro_layout)
     scene_graph = build_scene_graph(elements, orig_w, orig_h, zones)
 
     return {
@@ -2617,10 +2719,11 @@ def detect_ui_elements(image_path, device_pixel_ratio=1.0):
         "components": elements[:220],
         "zones": zones,
         "scene_graph": scene_graph,
+        "macro_layout": macro_layout,
     }
 
 
-def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, col_bands=None):
+def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, col_bands=None, macro_layout=None):
     # Filter out low-confidence OCR text. Confidence < 45 is likely garbage.
     # For large headings (font_size >= 32), require confidence >= 50 since OCR errors on large text
     # produce plausible-looking but wrong fragments (e.g. "ees Eee" from partial letter detection).
@@ -2670,11 +2773,16 @@ def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, c
             "muted": "#aaaacc" if theme == "dark" else "#57606a",
         }
 
-    # T1: Store column layout info from vertical projection
+    # T1: Store column layout info from vertical projection + macro layout
     col_layout = "single"
     if col_bands and len(col_bands) >= 2:
         # Two or more distinct content columns = multi-column layout
         col_layout = "two-column" if len(col_bands) == 2 else "multi-column"
+
+    # Use macro layout to override col_layout if sidebar detected
+    macro_layout_type = (macro_layout or {}).get("layout_type", "generic")
+    if macro_layout_type == "sidebar-main":
+        col_layout = "two-column"
 
     # Dynamically find navbar bottom from full-width toolbars near top
     navbar_bottom_pct = 0.10
@@ -2746,6 +2854,7 @@ def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, c
                 "color": e.get("text_color", palette["text"]),
                 "font_size": fs, "font_weight": fw,
                 "x_pct": round(x_pct, 3), "y_pct": round(y_pct, 3),
+                "w_pct": round(e["width"] / img_w, 4),
                 "h_pct": round(e["height"] / img_h, 4),
             })
 
@@ -2830,6 +2939,7 @@ def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, c
         "zone_bounds": zone_bounds,
         "layout": "two-column" if is_two_col else "single-column",
         "col_bands": col_bands or [],
+        "macro_layout": macro_layout or {},
     }
 
 
@@ -2994,6 +3104,7 @@ def build_scene_graph(elements, img_w, img_h, zones_analysis=None):
             "image": {"width": int(img_w), "height": int(img_h)},
             "col_bands": zones_analysis.get("col_bands") or [],
             "layout": zones_analysis.get("layout"),
+            "macro_layout": zones_analysis.get("macro_layout") or {},
         },
         "nodes": nodes,
         "zones": zones,
@@ -3180,7 +3291,8 @@ def detect_with_regions(image_path, device_pixel_ratio=1.0):
     merged = fix_overlapping_text_zindex(merged)
 
     color_inventory = extract_color_inventory(image, page_background)
-    zones = build_zone_analysis(merged, w, h, page_bg_hex, color_inventory, col_bands)
+    macro_layout = detect_macro_layout(image, page_background)
+    zones = build_zone_analysis(merged, w, h, page_bg_hex, color_inventory, col_bands, macro_layout)
     scene_graph = build_scene_graph(merged, w, h, zones)
 
     return {
@@ -3188,6 +3300,7 @@ def detect_with_regions(image_path, device_pixel_ratio=1.0):
         "components": merged[:220],
         "zones": zones,
         "scene_graph": scene_graph,
+        "macro_layout": macro_layout,
     }
 
 

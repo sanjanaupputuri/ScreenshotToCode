@@ -62,7 +62,7 @@ function CodeBlock({ code, onSave, saving, saved }) {
       {tab === "code" ? (
         <pre style={{
           margin: 0, padding: "1rem", fontSize: "0.76rem", fontFamily: "monospace",
-          whiteSpace: "pre-wrap", overflowY: "auto", maxHeight: 340,
+          whiteSpace: "pre-wrap", overflowY: "auto", maxHeight: 600,
           color: "#1c1e21", lineHeight: 1.6, background: "#fafafa"
         }}>
           {code}
@@ -72,7 +72,7 @@ function CodeBlock({ code, onSave, saving, saved }) {
           srcDoc={code}
           title="preview"
           sandbox="allow-scripts"
-          style={{ width: "100%", height: 340, border: "none", display: "block" }}
+          style={{ width: "100%", height: 600, border: "none", display: "block" }}
         />
       )}
     </div>
