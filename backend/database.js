@@ -149,12 +149,38 @@ export async function initializeDatabase() {
         max_height REAL,
         text_pattern TEXT,
         fill_mode TEXT,
+        border_radius_tier TEXT DEFAULT 'any',
         z_index INTEGER DEFAULT 10,
         priority INTEGER DEFAULT 1,
         text_role TEXT,
         description TEXT
       );
     `);
+
+    // Stage 2 templates: add optional HTML/CSS templates to primitive profiles (migration-safe).
+    const cols = await all('PRAGMA table_info(primitive_profiles)');
+    const names = new Set(cols.map((c) => c.name));
+    const ensure = async (name, spec) => {
+      if (!names.has(name)) {
+        await exec(`ALTER TABLE primitive_profiles ADD COLUMN ${name} ${spec}`);
+        names.add(name);
+      }
+    };
+    await ensure('min_aspect', 'REAL');
+    await ensure('max_aspect', 'REAL');
+    await ensure('min_width', 'REAL');
+    await ensure('max_width', 'REAL');
+    await ensure('min_height', 'REAL');
+    await ensure('max_height', 'REAL');
+    await ensure('text_pattern', 'TEXT');
+    await ensure('fill_mode', 'TEXT');
+    await ensure('border_radius_tier', "TEXT DEFAULT 'any'");
+    await ensure('z_index', 'INTEGER DEFAULT 10');
+    await ensure('priority', 'INTEGER DEFAULT 1');
+    await ensure('text_role', 'TEXT');
+    await ensure('description', 'TEXT');
+    await ensure('html_template', 'TEXT');
+    await ensure('css_template', 'TEXT');
 
     await populateInitialData();
     console.log('SQLite database initialized');
@@ -173,8 +199,9 @@ async function populateInitialData() {
   const primitiveProfileCount = (await get('SELECT COUNT(*) as c FROM primitive_profiles'))?.c ?? 0;
   const colorCount = (await get('SELECT COUNT(*) as c FROM colors'))?.c ?? 0;
   const spacingCount = (await get('SELECT COUNT(*) as c FROM spacing'))?.c ?? 0;
+  const missingProfileTemplates = (await get('SELECT COUNT(*) as c FROM primitive_profiles WHERE html_template IS NULL'))?.c ?? 0;
 
-  if (componentCount > 0 && primitiveProfileCount > 0 && colorCount > 0 && spacingCount > 0) return;
+  if (componentCount > 0 && primitiveProfileCount > 0 && colorCount > 0 && spacingCount > 0 && missingProfileTemplates === 0) return;
 
   const components = [
     [1, 'button_primary', 'form', '<button class="{{classes}}">{{text}}</button>', '', 'Primary button'],
@@ -227,17 +254,108 @@ async function populateInitialData() {
   ];
 
   const primitiveProfiles = [
-    ['page_toolbar', 'shape', 'toolbar', 4.0, 80.0, 300, 5000, 24, 96, null, 'filled', 4, 9, 'chrome', 'Top browser or app toolbar'],
-    ['filled_button', 'shape', 'button', 1.8, 12.0, 40, 420, 22, 72, null, 'filled', 12, 8, 'action', 'Filled action button'],
-    ['border_input', 'shape', 'input', 2.5, 24.0, 80, 1200, 20, 72, null, 'outlined', 11, 8, 'field', 'Outlined input field'],
-    ['tab_chip', 'shape', 'chip', 1.5, 12.0, 24, 400, 16, 56, null, 'outlined', 10, 7, 'tab', 'Tab, filter, or chip'],
-    ['icon_glyph', 'shape', 'icon', 0.65, 1.35, 8, 80, 8, 80, null, 'any', 14, 8, 'icon', 'Icon glyph or badge'],
-    ['avatar_circle', 'shape', 'avatar', 0.75, 1.25, 20, 140, 20, 140, null, 'any', 15, 8, 'avatar', 'Avatar or circular marker'],
-    ['panel_container', 'shape', 'panel', 0.4, 50.0, 40, 5000, 24, 3000, null, 'any', 6, 5, 'container', 'Layout container or card'],
-    ['repo_title', 'text', 'title', 1.8, 40.0, 80, 2400, 18, 120, '(repo|firetruck|readme|issues|pull|actions|projects|insights|settings)', 'any', 30, 10, 'title', 'Repository heading or prominent nav text'],
-    ['nav_text', 'text', 'nav_text', 1.0, 40.0, 10, 1200, 10, 48, '(code|issues|wiki|pull|actions|projects|security|settings|fork|star|watch)', 'any', 24, 8, 'nav', 'Navigation text'],
-    ['muted_label', 'text', 'muted_text', 1.0, 60.0, 8, 1400, 8, 40, '(public|commits|activity|releases|packages|published|create|upload|minute|ago)', 'any', 22, 7, 'muted', 'Secondary label text'],
-    ['body_copy', 'text', 'body_text', 1.0, 80.0, 8, 2400, 8, 52, null, 'any', 20, 3, 'body', 'General body copy'],
+    // shape profiles — [name, base_kind, target_type, min_aspect, max_aspect, min_w, max_w, min_h, max_h, text_pattern, fill_mode, border_radius_tier, z_index, priority, text_role, description]
+    ['page_toolbar',      'shape', 'toolbar', 4.0, 80.0, 300, 5000, 24, 96,  null, 'filled',   'none',   4, 9, 'chrome',    'Top browser or app toolbar'],
+    ['filled_button',     'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'filled',   'small',  12, 8, 'action',   'Filled primary action button'],
+    ['outline_button',    'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'outlined', 'small',  12, 7, 'action',   'Secondary outlined button'],
+    ['ghost_button',      'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'any',      'none',   11, 6, 'action',   'Ghost/text-only button'],
+    ['pill_button',       'shape', 'button',  1.8, 12.0, 40,  420,  22, 72,  null, 'filled',   'full',   12, 8, 'action',   'Pill-shaped CTA button'],
+    ['icon_button',       'shape', 'button',  0.7, 1.3,  20,  60,   20, 60,  null, 'any',      'any',    12, 7, 'icon',     'Square icon-only button'],
+    ['border_input',      'shape', 'input',   2.5, 24.0, 80,  1200, 20, 72,  null, 'outlined', 'small',  11, 8, 'field',    'Outlined input field'],
+    ['search_input',      'shape', 'input',   3.0, 30.0, 120, 1200, 28, 60,  '(search|find|query)', 'outlined', 'small', 11, 9, 'field', 'Search input with icon'],
+    ['tab_chip',          'shape', 'chip',    1.5, 12.0, 24,  400,  16, 56,  null, 'outlined', 'medium', 10, 7, 'tab',      'Tab, filter, or chip'],
+    ['pill_chip',         'shape', 'chip',    1.5, 12.0, 24,  400,  16, 40,  null, 'any',      'full',   10, 7, 'badge',    'Pill badge or label'],
+    ['select_dropdown',   'shape', 'select',  1.5, 10.0, 40,  400,  18, 48,  null, 'any',      'small',  11, 8, 'select',   'Dropdown selector'],
+    ['toggle_switch',     'shape', 'toggle',  1.5, 3.0,  28,  80,   14, 32,  null, 'filled',   'full',   11, 8, 'toggle',   'Toggle switch'],
+    ['icon_glyph',        'shape', 'icon',    0.65,1.35, 8,   80,   8,  80,  null, 'any',      'any',    14, 8, 'icon',     'Icon glyph or badge'],
+    ['avatar_circle',     'shape', 'avatar',  0.75,1.25, 20,  140,  20, 140, null, 'any',      'full',   15, 8, 'avatar',   'Avatar or circular marker'],
+    ['card_container',    'shape', 'card',    0.5, 3.0,  100, 2000, 80, 1200,null, 'any',      'small',  6,  6, 'card',     'Card with multiple children'],
+    ['panel_container',   'shape', 'panel',   0.4, 50.0, 40,  5000, 24, 3000,null, 'any',      'any',    6,  5, 'container','Layout container'],
+    ['divider_line',      'shape', 'divider', 5.0, 9999, 100, 9999, 1,  4,   null, 'any',      'none',   2,  9, 'divider',  'Horizontal divider line'],
+    // text profiles
+    ['display_heading',   'text', 'display_heading', 1.0, 40.0, 80, 2400, 48, 200, null, 'any', 'any', 30, 10, 'display',  'Large display heading'],
+    ['repo_title',        'text', 'title',    1.8, 40.0, 80,  2400, 18, 120, '(repo|firetruck|readme|issues|pull|actions|projects|insights|settings)', 'any', 'any', 30, 10, 'title', 'Repository heading'],
+    ['section_heading',   'text', 'heading',  1.0, 40.0, 60,  2400, 24, 80,  null, 'any', 'any', 28, 8, 'heading',  'Section heading'],
+    ['subheading',        'text', 'subheading',1.0,40.0, 40,  2400, 16, 40,  null, 'any', 'any', 25, 7, 'subheading','Subheading or subtitle'],
+    ['nav_text',          'text', 'nav_text', 1.0, 40.0, 10,  1200, 10, 48,  '(code|issues|wiki|pull|actions|projects|security|settings|fork|star|watch)', 'any', 'any', 24, 8, 'nav', 'Navigation text'],
+    ['badge_label',       'text', 'badge',    1.0, 10.0, 20,  200,  10, 28,  null, 'any', 'any', 22, 8, 'badge',    'Badge or label text'],
+    ['inline_link',       'text', 'link',     1.0, 40.0, 20,  800,  10, 28,  null, 'any', 'any', 22, 7, 'link',     'Inline link text'],
+    ['caption_text',      'text', 'caption',  1.0, 60.0, 8,   1400, 8,  22,  null, 'any', 'any', 20, 6, 'caption',  'Caption or small label'],
+    ['muted_label',       'text', 'muted_text',1.0,60.0, 8,   1400, 8,  40,  '(public|commits|activity|releases|packages|published|create|upload|minute|ago)', 'any', 'any', 22, 7, 'muted', 'Secondary label text'],
+    ['body_copy',         'text', 'body_text', 1.0,80.0, 8,   2400, 8,  52,  null, 'any', 'any', 20, 3, 'body',     'General body copy'],
+  ];
+
+  const primitiveProfileTemplates = [
+    ['filled_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['outline_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['ghost_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['pill_button', '<button type="button" style="{{style}}">{{text}}</button>', null],
+    ['icon_button', '<button type="button" style="{{style}}" aria-label="{{text}}"></button>', null],
+    ['border_input', '<input type="text" placeholder="{{text}}" readonly style="{{style}}" />', null],
+    ['search_input', '<input type="search" placeholder="{{text}}" readonly style="{{style}}" />', null],
+    ['select_dropdown', '<select style="{{style}}"><option>{{text}}</option></select>', null],
+    ['tab_chip', '<div style="{{style}}">{{text}}</div>', null],
+    ['pill_chip', '<div style="{{style}}">{{text}}</div>', null],
+    ['toggle_switch', '<button type="button" style="{{style}}" aria-pressed="false"></button>', null],
+    ['divider_line', '<div style="{{style}}"></div>', null],
+    ['card_container', '<div style="{{style}}">{{content}}</div>', null],
+    ['panel_container', '<div style="{{style}}">{{content}}</div>', null],
+    ['icon_glyph', '<div style="{{style}}" aria-hidden="true"></div>', null],
+    ['avatar_circle', '<div style="{{style}}" aria-hidden="true"></div>', null],
+    ['display_heading', '<div style="{{style}}">{{text}}</div>', null],
+    ['repo_title', '<div style="{{style}}">{{text}}</div>', null],
+    ['section_heading', '<div style="{{style}}">{{text}}</div>', null],
+    ['subheading', '<div style="{{style}}">{{text}}</div>', null],
+    ['nav_text', '<div style="{{style}}">{{text}}</div>', null],
+    ['badge_label', '<div style="{{style}}">{{text}}</div>', null],
+    ['inline_link', '<a href=\"#\" style=\"{{style}}\">{{text}}</a>', null],
+    ['caption_text', '<div style="{{style}}">{{text}}</div>', null],
+    ['muted_label', '<div style="{{style}}">{{text}}</div>', null],
+    ['body_copy', '<div style="{{style}}">{{text}}</div>', null],
+  ];
+
+  // T12: Add 2-col split, 3-col grid, form page templates
+  const extraTemplates = [
+    ['two-col-split', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 2rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.15);">{{navContent}}</nav>
+<main style="display:grid;grid-template-columns:1fr 1fr;min-height:calc(100vh - 60px);">
+  <section style="padding:3rem 2rem;">{{leftContent}}</section>
+  <section style="padding:3rem 2rem;background:{{surfaceBg}};">{{rightContent}}</section>
+</main>`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+button{cursor:pointer;transition:opacity 0.15s,transform 0.1s;}
+button:hover{opacity:0.9;transform:translateY(-1px);}
+input:focus{outline:2px solid {{accentColor}};box-shadow:0 0 0 3px {{accentColor}}33;}`,
+    'Two-column split layout'],
+
+    ['three-col-grid', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 2rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.15);">{{navContent}}</nav>
+<main style="padding:2rem;max-width:1280px;margin:0 auto;">
+  {{heroSection}}
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;margin-top:2rem;">{{gridItems}}</div>
+</main>
+{{footerSection}}`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+.card{background:{{surfaceBg}};border:1px solid {{borderColor}};border-radius:8px;padding:1.5rem;transition:box-shadow 0.2s;}
+.card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+button{cursor:pointer;transition:opacity 0.15s;}
+button:hover{opacity:0.9;}`,
+    'Three-column grid layout'],
+
+    ['form', `<nav style="background:{{navBg}};display:flex;align-items:center;padding:0 2rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.15);">{{navContent}}</nav>
+<main style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 60px);padding:2rem;">
+  <form style="background:{{surfaceBg}};border:1px solid {{borderColor}};border-radius:12px;padding:2.5rem;width:100%;max-width:480px;display:flex;flex-direction:column;gap:1.25rem;">
+    {{formContent}}
+  </form>
+</main>`,
+    `*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:{{bg}};color:{{textColor}};min-height:100vh;}
+label{display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:500;}
+input,select,textarea{border:1px solid {{borderColor}};border-radius:6px;padding:8px 12px;font-size:14px;background:{{bg}};color:{{textColor}};outline:none;}
+input:focus,select:focus,textarea:focus{border-color:{{accentColor}};box-shadow:0 0 0 3px {{accentColor}}33;}
+button[type=submit]{background:{{accentColor}};color:#fff;border:none;border-radius:6px;padding:10px 20px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity 0.15s;}
+button[type=submit]:hover{opacity:0.9;}`,
+    'Form/auth page'],
   ];
 
   const pageTemplates = [
@@ -293,7 +411,7 @@ button:hover{opacity:0.9;}`,
 
   const pageTemplateCount = (await get('SELECT COUNT(*) as c FROM page_templates'))?.c ?? 0;
   if (pageTemplateCount === 0) {
-    for (const [kind, html, css, desc] of pageTemplates) {
+    for (const [kind, html, css, desc] of [...pageTemplates, ...extraTemplates]) {
       await run(
         'INSERT OR IGNORE INTO page_templates (page_kind, html_scaffold, css_scaffold, description) VALUES (?, ?, ?, ?)',
         [kind, html, css, desc],
@@ -338,9 +456,16 @@ button:hover{opacity:0.9;}`,
     for (const profile of primitiveProfiles) {
       await run(
         `INSERT OR IGNORE INTO primitive_profiles
-        (name, base_kind, target_type, min_aspect, max_aspect, min_width, max_width, min_height, max_height, text_pattern, fill_mode, z_index, priority, text_role, description)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (name, base_kind, target_type, min_aspect, max_aspect, min_width, max_width, min_height, max_height, text_pattern, fill_mode, border_radius_tier, z_index, priority, text_role, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         profile,
+      );
+    }
+
+    for (const [name, htmlTemplate, cssTemplate] of primitiveProfileTemplates) {
+      await run(
+        'UPDATE primitive_profiles SET html_template = COALESCE(html_template, ?), css_template = COALESCE(css_template, ?) WHERE name = ?',
+        [htmlTemplate, cssTemplate, name],
       );
     }
   });
@@ -457,6 +582,35 @@ function fillModeForElement(element) {
   return 'any';
 }
 
+function borderRadiusTierForElement(element) {
+  const r = Number(element.border_radius) || 0;
+  const h = Number(element.height) || 1;
+  const ratio = r / h;
+  if (ratio >= 0.45) return 'full';
+  if (ratio >= 0.15) return 'medium';
+  if (r >= 2) return 'small';
+  return 'none';
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function rangeScore(value, minValue, maxValue, inRangePoints = 2, outOfRangePenalty = 1) {
+  if (minValue === null && maxValue === null) return 0;
+  const min = minValue === null ? -Infinity : Number(minValue);
+  const max = maxValue === null ? Infinity : Number(maxValue);
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return -outOfRangePenalty;
+
+  if (numeric >= min && numeric <= max) return inRangePoints;
+
+  const span = Math.max(1e-6, max - min);
+  const nearest = clamp(numeric, min, max);
+  const normalizedDistance = Math.abs(numeric - nearest) / span;
+  return -outOfRangePenalty - (normalizedDistance * outOfRangePenalty);
+}
+
 function scoreProfileMatch(element, profile) {
   const aspect = (Number(element.width) || 1) / Math.max(Number(element.height) || 1, 1);
   const width = Number(element.width) || 0;
@@ -464,34 +618,51 @@ function scoreProfileMatch(element, profile) {
   const text = element.text || '';
   let score = 0;
 
-  if (profile.base_kind !== (element.kind || 'shape')) return -1;
-  if (
-    element.kind === 'shape' &&
-    element.type &&
-    element.type !== 'shape' &&
-    element.type !== 'text' &&
-    profile.target_type !== element.type
-  ) {
-    return -1;
-  }
-  if (profile.min_aspect !== null && aspect < profile.min_aspect) return -1;
-  if (profile.max_aspect !== null && aspect > profile.max_aspect) return -1;
-  if (profile.min_width !== null && width < profile.min_width) return -1;
-  if (profile.max_width !== null && width > profile.max_width) return -1;
-  if (profile.min_height !== null && height < profile.min_height) return -1;
-  if (profile.max_height !== null && height > profile.max_height) return -1;
-  if (profile.fill_mode && profile.fill_mode !== 'any' && profile.fill_mode !== fillModeForElement(element)) return -1;
-  if (!textMatchesPattern(text, profile.text_pattern)) return -1;
+  if (profile.base_kind !== (element.kind || 'shape')) return -Infinity;
 
-  score += profile.priority || 1;
-  if ((element.type || '') === profile.target_type) score += 2;
-  if (profile.text_pattern && text) score += 2;
+  // Soft-score ranges (Stage 2 template scoring). Hard filtering causes overconfident matches; we instead
+  // require a minimum score threshold downstream and can fall back to `semantic_type: "unknown"`.
+  score += rangeScore(aspect, profile.min_aspect, profile.max_aspect, 2, 1);
+  score += rangeScore(width, profile.min_width, profile.max_width, 2, 1);
+  score += rangeScore(height, profile.min_height, profile.max_height, 2, 1);
+
+  const fillMode = fillModeForElement(element);
+  if (profile.fill_mode && profile.fill_mode !== 'any') {
+    score += (profile.fill_mode === fillMode) ? 1.25 : -1.75;
+  }
+
+  if (profile.text_pattern) {
+    score += textMatchesPattern(text, profile.text_pattern) ? 2.25 : -2.25;
+  }
+
+  // T9: Border radius tier scoring
+  const elTier = borderRadiusTierForElement(element);
+  const profTier = profile.border_radius_tier || 'any';
+  if (profTier !== 'any') {
+    score += (profTier === elTier) ? 2.0 : -1.5;
+  }
+
+  score += (Number(profile.priority) || 1) * 0.35;
+
+  const rawType = element.type || '';
+  const profileType = profile.target_type || '';
+  if (rawType && profileType) {
+    if (rawType === profileType) score += 2.0;
+    else if (rawType !== 'shape' && rawType !== 'text') score -= 1.0;
+  }
+
+  if (text && element.kind === 'text') score += Math.min(1.25, Math.max(0, text.length / 40));
   return score;
 }
 
 export async function enrichDetectedElements(elements = []) {
   await initializeDatabase();
   const profiles = await all('SELECT * FROM primitive_profiles ORDER BY priority DESC, id ASC');
+  const baseThreshold = Number(process.env.PROFILE_MATCH_THRESHOLD || 4.5);
+  const thresholdFor = (element) => {
+    if ((element.kind || 'shape') === 'text') return Math.max(3.0, baseThreshold - 1.0);
+    return baseThreshold;
+  };
 
   return elements.map((element) => {
     let bestProfile = null;
@@ -505,27 +676,38 @@ export async function enrichDetectedElements(elements = []) {
       }
     }
 
-    if (!bestProfile || bestScore < 0) {
+    const acceptThreshold = thresholdFor(element);
+    const acceptMatch = bestProfile && Number.isFinite(bestScore) && bestScore >= acceptThreshold;
+
+    if (!acceptMatch) {
+      const rawType = element.type || (element.kind === 'text' ? 'text' : 'shape');
+      const shouldForceUnknown = (element.kind === 'shape' && (rawType === 'shape' || !rawType));
       return {
         ...element,
-        semantic_type: element.type,
+        semantic_type: shouldForceUnknown ? 'unknown' : rawType,
         text_role: element.kind === 'text' ? 'body' : 'container',
         z_index: element.z_index ?? (element.kind === 'text' ? 20 : 5),
+        profile_name: null,
+        profile_score: bestScore,
       };
     }
 
-    // Don't upgrade a generic 'shape' to 'button' via profile matching —
-    // only real button/chip/input detections should be rendered as interactive controls.
+    // Allow shape→button/chip/input upgrade when the profile score is strong (≥7.0).
+    // A weak match keeps the raw type to avoid false positives.
     const rawType = element.type;
     const profileType = bestProfile.target_type;
     const isControlUpgrade = rawType === 'shape' && ['button', 'chip', 'input'].includes(profileType);
+    const upgradeAllowed = !isControlUpgrade || bestScore >= 7.0;
 
     return {
       ...element,
-      semantic_type: isControlUpgrade ? rawType : profileType,
+      semantic_type: upgradeAllowed ? profileType : rawType,
       text_role: bestProfile.text_role || (element.kind === 'text' ? 'body' : 'container'),
       z_index: bestProfile.z_index ?? element.z_index ?? 10,
       profile_name: bestProfile.name,
+      profile_score: bestScore,
+      template_html: bestProfile.html_template || null,
+      template_css: bestProfile.css_template || null,
     };
   });
 }

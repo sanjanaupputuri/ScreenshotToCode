@@ -23,10 +23,17 @@ export async function generateCode(imagePath, metadata = {}) {
   });
 
   const USE_REGIONS = process.env.USE_REGION_DETECTION === 'true';
-  const detection = await DetectionService.detectElements(imagePath, USE_REGIONS);
+  const devicePixelRatio = Number(process.env.DEVICE_PIXEL_RATIO || 1);
+  const detection = await DetectionService.detectElements(imagePath, {
+    useRegions: USE_REGIONS,
+    devicePixelRatio: Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1,
+  });
   
   if (USE_REGIONS) {
     console.log('  Using region-based detection (2x2 grid with overlap)');
+  }
+  if (Number.isFinite(devicePixelRatio) && devicePixelRatio !== 1) {
+    console.log(`  Normalizing device pixel ratio: ${devicePixelRatio}x`);
   }
 
   // Stage 1b: Ollama layout refinement (identify page type, suppress noise)
@@ -62,6 +69,8 @@ export async function generateCode(imagePath, metadata = {}) {
 
   const baseHTML = ComponentService.generateHTML(processed);
   console.log(`${requestLabel}Base HTML: ${baseHTML.length} chars`);
+  const snippets = ComponentService.generateSnippets(processed);
+  console.log(`${requestLabel}Stage 2 snippets: ${snippets.length}`);
 
   console.log('\n' + '='.repeat(60));
   console.log(`${requestLabel}STAGE 4: OLLAMA ENRICHMENT (40% — CSS + semantic markup)`);
@@ -75,6 +84,8 @@ export async function generateCode(imagePath, metadata = {}) {
     refinement.page_kind || 'generic',
     detection.zones || null,
     imagePath,
+    detection.scene_graph || null,
+    snippets,
   );
 
   console.log(`${requestLabel}Final HTML length: ${refinedHTML.length}`);
