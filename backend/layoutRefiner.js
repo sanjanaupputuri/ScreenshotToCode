@@ -280,6 +280,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const navBg = navbar?.bg && navbar.bg !== bg ? navbar.bg : (isDark ? darken(bg, 10) : '#ffffff');
   const navTextCol = isDark ? '#e5e7eb' : '#374151';
   const navEls = (navbar?.elements || []).sort((a,b) => (a.x_pct||0)-(b.x_pct||0));
+  const brandLogoEl = navEls.find(e => e.role === 'brand_logo' && (e.x_pct||0) < 0.15);
   const logoEl = navEls.find(e => e.role === 'logo' && (e.x_pct||0) < 0.15 && !NAV_TAB_WORDS.test(e.text));
   const navLinks = navEls.filter(e => e.role === 'nav-links' && e !== logoEl);
   const navActions = navEls.filter(e => e.role === 'nav-actions');
@@ -287,11 +288,20 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const navInputs = navEls.filter(e => e.role === 'input');
   const navSelects = navEls.filter(e => e.role === 'select');
 
-  // Logo: image placeholder if no text logo (plan: custom icons → placeholder)
+  // Logo: brand_logo placeholder (non-text) preferred, else text logo, else fallback mark.
   const hasNavContent = navEls.length > 0;
-  const logoHTML = logoEl
+  const brandLogoHTML = brandLogoEl ? (() => {
+    const w = brandLogoEl.width_pct ? Math.max(24, Math.round(brandLogoEl.width_pct * OUTPUT_W)) : 32;
+    const h = brandLogoEl.h_pct ? Math.max(24, Math.round(brandLogoEl.h_pct * imgH * scale)) : 32;
+    const r = Math.min(10, Math.round(Math.min(w, h) * 0.22));
+    const fill = brandLogoEl.bg || accent;
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="flex-shrink:0;display:block;"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" fill="${fill}"/></svg>`;
+  })() : '';
+  const textLogoHTML = logoEl
     ? `<span style="font-family:${displayFont};color:${logoEl.color||navTextCol};font-size:${Math.min(logoEl.font_size||18,22)}px;font-weight:700;white-space:nowrap;flex-shrink:0;">${esc(logoEl.text)}</span>`
-    : (hasNavContent ? `<div style="width:32px;height:32px;background:${accent};border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">W</div>` : '');
+    : '';
+  const fallbackLogoHTML = hasNavContent ? `<div style="width:32px;height:32px;background:${accent};border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">W</div>` : '';
+  const logoHTML = brandLogoHTML || textLogoHTML || fallbackLogoHTML;
 
   const navHTML = hasNavContent ? `<nav style="background:${navBg};display:flex;align-items:center;padding:0 2rem;height:60px;gap:${zoneGap(navbar)};border-bottom:1px solid ${colors.border};position:sticky;top:0;z-index:100;">
   ${logoHTML}
@@ -403,7 +413,13 @@ function buildSemanticFromZones(zones, pageKind, image) {
       && e !== badgeEl && !usedTexts.has(e.text)
     );
 
-    const selectEls = mainEls.filter(e => e.role === 'select');
+    const norm = (t) => (t || '').trim().toLowerCase();
+    const footerSelectText = new Set((footer?.elements || []).filter(e => e.role === 'select').map(e => norm(e.text)));
+    let selectEls = mainEls.filter(e => e.role === 'select');
+    if (footerSelectText.size) {
+      // UNIVERSAL: If a select exists in both content and footer, keep only the footer instance.
+      selectEls = selectEls.filter(e => !footerSelectText.has(norm(e.text)));
+    }
     const toggleEls = mainEls.filter(e => e.role === 'toggle');
 
     // otherEls: exclude search, filter buttons, badge text, already-used texts, and OCR garbage
@@ -432,9 +448,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const filterHTML = pillItems.length ? `<div class="filter-pills" style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;">
   ${pillItems.map((e,i) => {
     const isActive = i === 0;
-    const activeBg = isDark ? '#fff' : '#111827';
-    const activeText = isDark ? '#111827' : '#fff';
-    return `<button onclick="document.querySelectorAll('.filter-pills button').forEach(b=>{b.style.background='transparent';b.style.color='${textColor}';b.style.borderColor='${colors.border}'});this.style.background='${activeBg}';this.style.color='${activeText}';this.style.borderColor='${activeBg}';" style="background:${isActive?activeBg:'transparent'};color:${isActive?activeText:textColor};border:1px solid ${isActive?activeBg:colors.border};border-radius:20px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.15s;">${esc(e.text)}</button>`;
+    return `<button type="button" class="filter-pill${isActive?' active':''}" style="background:transparent;color:${textColor};border:1px solid ${colors.border};border-radius:20px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.15s;">${esc(e.text)}</button>`;
   }).join('')}
 </div>` : '';
 
@@ -442,6 +456,15 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const toolbarEls = [...selectEls, ...toggleEls];
     const toolbarHTML = toolbarEls.length ? `<div style="display:flex;align-items:center;gap:1rem;padding:0.75rem 0;margin-top:0.5rem;">
   ${selectEls.map(e => `<select style="background:${e.bg||'#fff'};border:1px solid ${colors.border};border-radius:${e.border_radius||6}px;padding:6px 12px;font-size:14px;cursor:pointer;outline:none;"><option>${esc(e.text||'')}</option></select>`).join('')}
+  ${toggleEls.map(e => {
+    const w = e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46;
+    const h = e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24;
+    const isOn = (e.state === 'on');
+    const dot = Math.max(10, h - 8);
+    return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;">
+      <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
+    </button>`;
+  }).join('')}
 </div>` : '';
 
     // Remaining content rows — only non-used, non-garbage elements
@@ -496,10 +519,22 @@ function buildSemanticFromZones(zones, pageKind, image) {
     );
     const footerBtns = footer.elements.filter(e => e.role === 'button');
     const footerSelects = footer.elements.filter(e => e.role === 'select');
-    footerHTML = `<footer style="background:${footerBg};padding:1rem 2rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;border-top:1px solid ${colors.border};">
-  ${footerSelects.map(e=>`<select style="background:${e.bg||'#fff'};border:1px solid ${colors.border};border-radius:${e.border_radius||6}px;padding:5px 10px;font-size:13px;cursor:pointer;outline:none;"><option>${esc(e.text||'')}</option></select>`).join('')}
-  ${footerEls.sort((a,b)=>(a.x_pct||0)-(b.x_pct||0)).map(e=>`<span style="color:${e.color||mutedColor};font-size:${Math.min(e.font_size||14,16)}px;font-weight:${e.font_weight||400};">${esc(e.text)}</span>`).join('')}
-  <div style="margin-left:auto;display:flex;gap:0.5rem;">
+    const footerToggles = footer.elements.filter(e => e.role === 'toggle');
+    footerHTML = `<footer style="background:${footerBg};display:flex;align-items:center;justify-content:space-between;padding:0.75rem 2rem;border-top:1px solid ${colors.border};gap:1rem;flex-wrap:wrap;">
+  <div class="footer-left" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    ${footerSelects.map(e=>`<select style="background:${e.bg||'#fff'};border:1px solid ${colors.border};border-radius:${e.border_radius||6}px;padding:5px 10px;font-size:13px;cursor:pointer;outline:none;"><option>${esc(e.text||'')}</option></select>`).join('')}
+    ${footerToggles.map(e => {
+      const w = e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46;
+      const h = e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24;
+      const isOn = (e.state === 'on');
+      const dot = Math.max(10, h - 8);
+      return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;">
+        <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
+      </button>`;
+    }).join('')}
+    ${footerEls.sort((a,b)=>(a.x_pct||0)-(b.x_pct||0)).map(e=>`<span style="color:${e.color||mutedColor};font-size:${Math.min(e.font_size||14,16)}px;font-weight:${e.font_weight||400};">${esc(e.text)}</span>`).join('')}
+  </div>
+  <div class="footer-right" style="display:flex;gap:0.5rem;align-items:center;">
     ${footerBtns.map(e=>`<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:8px 20px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </footer>`;
@@ -515,6 +550,8 @@ function buildSemanticFromZones(zones, pageKind, image) {
   --muted: ${colors.muted};
   --border: ${colors.border};
   --surface: ${colors.surface};
+  --pill-active-bg: ${isDark ? '#fff' : '#111827'};
+  --pill-active-text: ${isDark ? '#111827' : '#fff'};
 }
 body { font-family: ${bodyFont}; background: var(--bg); color: var(--text); min-height: 100vh; }
 a { color: var(--accent); text-decoration: none; }
@@ -524,6 +561,7 @@ button:hover { opacity: 0.9; cursor: pointer; transform: translateY(-1px); }
 button:active { transform: scale(0.97) translateY(0); }
 input:focus, select:focus { outline: 2px solid var(--accent); box-shadow: 0 0 0 3px ${accent}22; }
 nav a:hover { background: rgba(128,128,128,0.08); }
+.filter-pill.active { background: var(--pill-active-bg) !important; color: var(--pill-active-text) !important; border-color: var(--pill-active-bg) !important; }
 .toggle .dot { transition: transform 0.2s; }
 .toggle.on .dot { transform: translateX(18px); }
 input[type=search]::-webkit-search-cancel-button { display: none; }`;
@@ -550,6 +588,13 @@ document.querySelectorAll('.toggle').forEach(t => {
     const dot = t.querySelector('div');
     if (dot) dot.style.transform = t.classList.contains('on') ? 'translateX(18px)' : 'translateX(0)';
     t.style.background = t.classList.contains('on') ? '${accent}' : '#d1d5db';
+  });
+});
+// Filter pill interaction (UNIVERSAL: single handler, no inline onclick)
+document.querySelectorAll('.filter-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pill.classList.add('active');
   });
 });
 </script>

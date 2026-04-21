@@ -765,6 +765,88 @@ def fill_solidity(roi):
     return float(np.mean(dists < 40))
 
 
+def _toggle_thumb_mask(roi, track_bgr):
+    """
+    Build a binary mask for the likely toggle thumb region by selecting pixels that
+    differ strongly from the track color. Returns a uint8 mask (0/255).
+    """
+    h, w = roi.shape[:2]
+    flat = roi.reshape(-1, 3).astype(np.float32)
+    track = np.array(track_bgr, dtype=np.float32).reshape(1, 3)
+    dists = np.linalg.norm(flat - track, axis=1)
+    if dists.size == 0:
+        return None
+    # Use a percentile threshold so it adapts to different toggle colors.
+    thr = float(np.percentile(dists, 86))
+    raw = (dists >= thr).reshape(h, w).astype(np.uint8) * 255
+    raw = cv2.morphologyEx(raw, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations=1)
+    raw = cv2.morphologyEx(raw, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
+    return raw
+
+
+def detect_toggle_switch_state(roi):
+    """
+    Heuristic toggle detector.
+    Returns "on" | "off" if ROI looks like a toggle track + thumb, else None.
+    """
+    if roi is None or roi.size == 0:
+        return None
+    h, w = roi.shape[:2]
+    aspect = w / max(h, 1)
+    if not (28 <= w <= 70 and 14 <= h <= 36 and 1.5 <= aspect <= 2.6):
+        return None
+
+    flat = roi.reshape(-1, 3).astype(np.float32)
+    track_bgr = np.median(flat, axis=0)
+    track_var = float(np.std(flat))
+    if track_var > 70:
+        return None
+
+    mask = _toggle_thumb_mask(roi, track_bgr)
+    if mask is None:
+        return None
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    best = None
+    best_score = -1e9
+    for c in contours:
+        x, y, cw, ch = cv2.boundingRect(c)
+        area = cw * ch
+        if area < (w * h * 0.08) or area > (w * h * 0.60):
+            continue
+        c_aspect = cw / max(ch, 1)
+        if c_aspect < 0.65 or c_aspect > 1.55:
+            continue
+        # Thumb should sit with some padding from edges.
+        if x < 1 or (x + cw) > (w - 1):
+            continue
+        # Thumb should be reasonably centered vertically.
+        cy = y + ch / 2
+        if abs(cy - (h / 2)) > h * 0.25:
+            continue
+
+        thumb_pixels = roi[y:y + ch, x:x + cw].reshape(-1, 3).astype(np.float32)
+        if thumb_pixels.size == 0:
+            continue
+        thumb_bgr = np.median(thumb_pixels, axis=0)
+        thumb_luma = float(np.mean(thumb_bgr))
+        # Thumb is usually white/light.
+        if thumb_luma < 160:
+            continue
+
+        # Prefer larger, more circular blobs.
+        score = area - abs(c_aspect - 1.0) * 120
+        if score > best_score:
+            best_score = score
+            best = (x + cw / 2)
+
+    if best is None:
+        return None
+    return "on" if best > (w / 2) else "off"
+
+
 def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width,
                roi=None, page_background=None):
     aspect = w / max(h, 1)
@@ -790,6 +872,12 @@ def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width,
     # A real button must have a solid fill (not just colored text pixels on dark bg)
     # Low solidity means the region is mostly text/icons, not a solid button background
     is_solid_fill = solidity >= 0.6
+
+    # UNIVERSAL: Toggle switches should never be consumed as buttons/chips.
+    if text_count == 0 and roi is not None and 28 <= w <= 70 and 14 <= h <= 36 and 1.5 <= aspect <= 2.6:
+        state = detect_toggle_switch_state(roi)
+        if state:
+            return "toggle"
 
     # Button detection — requires solid fill
     if text_count > 0 and 2.0 <= aspect <= 10.0 and 28 <= h <= 80 and w >= 120:
@@ -1070,9 +1158,11 @@ def detect_shape_regions(image, text_regions, page_background):
 
         element_type = shape_type(x, y, w, h, len(linked_texts), width, height,
                                   fill_bgr, border_width, roi=roi, page_background=page_background)
-        if element_type not in ("button", "chip", "input"):
+        # UNIVERSAL: Preserve toggle classification (never coerce into a button).
+        if element_type not in ("button", "chip", "input", "toggle"):
             element_type = "button"
-        z_index = 10
+        toggle_state = detect_toggle_switch_state(roi) if element_type == "toggle" else None
+        z_index = 10 if element_type != "toggle" else 11
 
         # Extract text directly from the button region (don't rely on global OCR text matching)
         direct_text = ""
@@ -1088,6 +1178,7 @@ def detect_shape_regions(image, text_regions, page_background):
             "kind": "shape",
             "type": element_type,
             "text": direct_text,  # Store in 'text' field directly
+            "toggle_state": toggle_state,
             "x": int(x),
             "y": int(y),
             "width": int(w),
@@ -1170,9 +1261,13 @@ def detect_shape_regions(image, text_regions, page_background):
                 linked_texts.append(region)
 
         if bg_distance < 6 and border_width == 0 and not linked_texts:
+            # Keep toggle candidates even if their track is close to page background.
+            if detect_toggle_switch_state(roi) is None:
+                continue
             continue
 
         element_type = shape_type(x, y, w, h, len(linked_texts), width, height, fill_bgr, border_width, roi=roi, page_background=page_background)
+        toggle_state = detect_toggle_switch_state(roi) if element_type == "toggle" else None
         if element_type == "input" and linked_texts:
             text_content = " ".join(region.get("text", "") for region in sorted(linked_texts, key=lambda item: (item["x"], item["y"]))).strip()
             text_left = min(region["x"] for region in linked_texts)
@@ -1205,7 +1300,7 @@ def detect_shape_regions(image, text_regions, page_background):
         z_index = 5 + min(depth, 4)
         if element_type in ("icon", "avatar"):
             z_index = 14 + min(depth, 3)
-        elif element_type in ("chip", "button", "input"):
+        elif element_type in ("chip", "button", "input", "toggle"):
             z_index = 10 + min(depth, 3)
 
         # Extract text directly from button/chip regions
@@ -1224,6 +1319,7 @@ def detect_shape_regions(image, text_regions, page_background):
             "type": element_type,
             "text": direct_text,  # Store in 'text' field directly
             "_direct_text": direct_text,
+            "toggle_state": toggle_state,
             "x": int(x),
             "y": int(y),
             "width": int(w),
@@ -1441,6 +1537,14 @@ def filter_regions(regions):
     regions = sorted(regions, key=lambda item: (item.get("z_index", 0), item["area"]), reverse=True)
     kept = []
 
+    def _contains(parent, child, margin=2):
+        return (
+            child["x"] >= parent["x"] - margin and
+            child["y"] >= parent["y"] - margin and
+            child["x"] + child["width"] <= parent["x"] + parent["width"] + margin and
+            child["y"] + child["height"] <= parent["y"] + parent["height"] + margin
+        )
+
     for region in regions:
         duplicate = False
         for existing in kept:
@@ -1448,9 +1552,16 @@ def filter_regions(regions):
             y_overlap = max(0, min(region["y"] + region["height"], existing["y"] + existing["height"]) - max(region["y"], existing["y"]))
             overlap_area = x_overlap * y_overlap
             smaller = min(region["area"], existing["area"])
-            # Stricter overlap threshold for inputs: 40% instead of 55%
-            threshold = 0.40 if (region.get("type") == "input" or existing.get("type") == "input") else 0.55
+            # UNIVERSAL: Duplicate filtering at 40% overlap, but keep parent/child containments.
+            threshold = 0.40
             if smaller > 0 and overlap_area / smaller > threshold and region["kind"] == existing["kind"]:
+                # If one element fully contains the other, it's likely a parent/child (e.g. icon inside input).
+                if _contains(existing, region) or _contains(region, existing):
+                    continue
+                # Only treat as duplicates when areas are comparable (prevents panels killing children).
+                area_ratio = smaller / max(region["area"], existing["area"], 1)
+                if area_ratio < 0.55:
+                    continue
                 duplicate = True
                 break
 
@@ -2603,6 +2714,126 @@ def tag_dropdowns_and_images(elements, image):
     return elements
 
 
+def tag_brand_logo(elements, img_w, img_h):
+    """
+    UNIVERSAL: Detect the leftmost non-text region in the navbar as a brand logo placeholder.
+    If found, tag its type as 'brand_logo' so downstream templates/layout can render it.
+    """
+    shapes = [e for e in elements if e.get("kind") == "shape" and not (e.get("text") or "").strip()]
+    if not shapes:
+        return elements
+
+    navbar_max_y = img_h * 0.14
+    candidates = []
+    for s in shapes:
+        x, y, w, h = s.get("x", 0), s.get("y", 0), s.get("width", 0), s.get("height", 0)
+        if y > navbar_max_y:
+            continue
+        if x >= 120:
+            continue
+        if w < 24 or h < 24 or w > 80 or h > 80:
+            continue
+        aspect = w / max(h, 1)
+        if aspect < 0.6 or aspect > 3.4:
+            continue
+        # Exclude obvious tiny glyphs.
+        if w <= 24 and h <= 24:
+            continue
+        candidates.append(s)
+
+    if not candidates:
+        return elements
+
+    # Prefer the leftmost, then largest (more likely to be a logo mark).
+    best = sorted(candidates, key=lambda s: (s.get("x", 9999), -(s.get("area", s.get("width", 0) * s.get("height", 0)))))[0]
+    best["type"] = "brand_logo"
+    best["z_index"] = max(best.get("z_index", 12), 12)
+    return elements
+
+
+def _hex_luma(color):
+    rgb = rgb_from_hex(color)
+    if rgb is None:
+        return None
+    r, g, b = rgb
+    return float(r * 0.299 + g * 0.587 + b * 0.114)
+
+
+def reject_spurious_shapes(elements, img_w, img_h, page_bg_hex):
+    """
+    UNIVERSAL: Reject large false-positive panels that are basically background.
+    Criteria (per zone): height > 30% of zone height, no child text, fill ~ zone bg, no border.
+    """
+    shapes = [e for e in elements if e.get("kind") == "shape"]
+    if not shapes:
+        return elements
+
+    child_text_count = {}
+    for e in elements:
+        if e.get("kind") != "text":
+            continue
+        pid = e.get("parent_id")
+        if pid is None:
+            continue
+        child_text_count[pid] = child_text_count.get(pid, 0) + 1
+
+    # Compute basic navbar/footer bounds similarly to build_zone_analysis.
+    navbar_bottom_pct = 0.10
+    for s in sorted(shapes, key=lambda x: x.get("y", 0)):
+        if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.7:
+            bottom_pct = (s.get("y", 0) + s.get("height", 0)) / max(img_h, 1)
+            if bottom_pct < 0.40:
+                navbar_bottom_pct = max(navbar_bottom_pct, bottom_pct)
+    footer_top_pct = 0.88
+    for s in sorted(shapes, key=lambda x: x.get("y", 0), reverse=True):
+        if s.get("type") in ("toolbar", "panel") and s.get("width", 0) > img_w * 0.7:
+            top_pct = s.get("y", 0) / max(img_h, 1)
+            if top_pct > 0.65:
+                footer_top_pct = min(footer_top_pct, top_pct)
+
+    zones = [
+        ("navbar",  0.0,               navbar_bottom_pct),
+        ("content", navbar_bottom_pct, footer_top_pct),
+        ("footer",  footer_top_pct,    1.0),
+    ]
+
+    page_bg_l = _hex_luma(page_bg_hex) or 255.0
+    drop_ids = set()
+    for zone_name, y0p, y1p in zones:
+        y0, y1 = img_h * y0p, img_h * y1p
+        zone_h = max(1.0, y1 - y0)
+        zone_shapes = [s for s in shapes if y0 <= s.get("y", 0) < y1]
+        zone_bg = page_bg_hex
+        wide = next((s for s in sorted(zone_shapes, key=lambda x: x.get("width", 0), reverse=True)
+                     if s.get("width", 0) > img_w * 0.5 and s.get("type") in ("toolbar", "panel")), None)
+        if wide:
+            zone_bg = wide.get("background_color", page_bg_hex)
+        zone_bg_l = _hex_luma(zone_bg) or page_bg_l
+
+        for s in zone_shapes:
+            sid = s.get("id")
+            if sid is None:
+                continue
+            if s.get("type") not in ("panel", "toolbar", "shape", "card"):
+                continue
+            if (s.get("height", 0) or 0) <= zone_h * 0.30:
+                continue
+            if child_text_count.get(sid, 0) > 0:
+                continue
+            if (s.get("border_width", 0) or 0) > 0:
+                continue
+            fill = s.get("background_color", zone_bg)
+            fill_l = _hex_luma(fill)
+            if fill_l is None:
+                continue
+            if abs(fill_l - zone_bg_l) <= (0.12 * 255.0):
+                drop_ids.add(sid)
+
+    if not drop_ids:
+        return elements
+    return [e for e in elements if e.get("id") not in drop_ids]
+
+
 def detect_ui_elements(image_path, device_pixel_ratio=1.0):
     image = cv2.imread(image_path)
     if image is None:
@@ -2689,6 +2920,8 @@ def detect_ui_elements(image_path, device_pixel_ratio=1.0):
 
     # Tag dropdown elements and image placeholders using original (DPR-normalized) image
     elements = tag_dropdowns_and_images(elements, orig_image)
+    elements = tag_brand_logo(elements, orig_w, orig_h)
+    elements = reject_spurious_shapes(elements, orig_w, orig_h, hex_from_bgr(page_background))
 
     # T6: Sample gradients for panels/backgrounds
     # T7: Flag glassmorphism regions
@@ -2859,12 +3092,35 @@ def build_zone_analysis(elements, img_w, img_h, page_bg, color_inventory=None, c
             })
 
         for b in zone_shapes:
+            if b.get("type") == "brand_logo":
+                zone_elements.append({
+                    "role": "brand_logo",
+                    "bg": b.get("background_color", palette["accent"]),
+                    "border": b.get("border_color", "transparent"),
+                    "border_radius": b.get("border_radius", 6),
+                    "width_pct": round(b["width"] / img_w, 4),
+                    "x_pct": round(b["x"] / img_w, 3), "y_pct": round(b["y"] / img_h, 3),
+                    "h_pct": round(b["height"] / img_h, 4),
+                })
+                continue
             if b.get("type") == "select":
                 zone_elements.append({
                     "role": "select", "text": b.get("text", ""),
                     "bg": b.get("background_color", "#fff"),
                     "border": b.get("border_color", "#d0d7de"),
                     "border_radius": b.get("border_radius", 6),
+                    "x_pct": round(b["x"] / img_w, 3), "y_pct": round(b["y"] / img_h, 3),
+                    "h_pct": round(b["height"] / img_h, 4),
+                })
+                continue
+            if b.get("type") == "toggle":
+                zone_elements.append({
+                    "role": "toggle",
+                    "state": b.get("toggle_state"),
+                    "bg": b.get("background_color", palette["accent"]),
+                    "border": b.get("border_color", "#d0d7de"),
+                    "border_radius": b.get("border_radius", int(max(6, b.get("height", 20) // 2))),
+                    "width_pct": round(b["width"] / img_w, 4),
                     "x_pct": round(b["x"] / img_w, 3), "y_pct": round(b["y"] / img_h, 3),
                     "h_pct": round(b["height"] / img_h, 4),
                 })

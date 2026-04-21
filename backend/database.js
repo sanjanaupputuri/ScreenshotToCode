@@ -205,7 +205,7 @@ async function populateInitialData() {
   const needsFullInit = componentCount === 0 || primitiveProfileCount === 0 || colorCount === 0 || spacingCount === 0;
   const needsTemplateUpdate = missingProfileTemplates > 0;
   // Check if new profiles from the expanded library are missing
-  const hasNewProfiles = (await get("SELECT COUNT(*) as c FROM primitive_profiles WHERE name IN ('cta_button','sticky_navbar','feature_card','sidebar_panel','hero_section','footer_panel','active_filter_pill','toggle_switch_on','tab_bar')"))?.c ?? 0;
+  const hasNewProfiles = (await get("SELECT COUNT(*) as c FROM primitive_profiles WHERE name IN ('cta_button','sticky_navbar','feature_card','sidebar_panel','hero_section','footer_panel','active_filter_pill','toggle_switch_on','tab_bar','brand_logo')"))?.c ?? 0;
   const needsNewProfiles = hasNewProfiles < 9;
 
   if (!needsFullInit && !needsTemplateUpdate && !needsNewProfiles) return;
@@ -309,10 +309,13 @@ async function populateInitialData() {
     ['border_input',      'shape', 'input',   2.5, 24.0, 80,  1200, 20, 72,  null, 'outlined', 'small',  11, 8, 'field',    'Outlined input field'],
     ['search_input',      'shape', 'input',   3.0, 30.0, 120, 1200, 28, 60,  '(search|find|query)', 'outlined', 'small', 11, 9, 'field', 'Search input with icon'],
     ['search_input_icon', 'shape', 'input',   3.0, 30.0, 120, 1200, 28, 60,  null, 'outlined', 'medium', 11, 8, 'field',    'Search input with icon inside'],
-    ['tab_chip',          'shape', 'chip',    1.5, 12.0, 24,  400,  16, 56,  null, 'outlined', 'medium', 10, 7, 'tab',      'Tab, filter, or chip'],
-    ['pill_chip',         'shape', 'chip',    1.5, 12.0, 24,  400,  16, 40,  null, 'any',      'full',   10, 7, 'badge',    'Pill badge or label'],
-    ['active_filter_pill','shape', 'chip',    1.5, 10.0, 24,  300,  16, 40,  null, 'filled',   'full',   10, 8, 'filter',   'Active filter pill (filled)'],
-    ['inactive_filter_pill','shape','chip',   1.5, 10.0, 24,  300,  16, 40,  null, 'outlined', 'full',   10, 7, 'filter',   'Inactive filter pill (outlined)'],
+    // UNIVERSAL: Pills/chips must allow short labels like "All", "CMS" — min width 30px.
+    ['tab_chip',          'shape', 'chip',    1.5, 12.0, 30,  400,  16, 56,  null, 'outlined', 'medium', 10, 7, 'tab',      'Tab, filter, or chip'],
+    ['pill_chip',         'shape', 'chip',    1.5, 12.0, 30,  400,  16, 40,  null, 'any',      'full',   10, 7, 'badge',    'Pill badge or label'],
+    ['active_filter_pill','shape', 'chip',    1.5, 10.0, 30,  300,  16, 40,  null, 'filled',   'full',   10, 8, 'filter',   'Active filter pill (filled)'],
+    ['inactive_filter_pill','shape','chip',   1.5, 10.0, 30,  300,  16, 40,  null, 'outlined', 'full',   10, 7, 'filter',   'Inactive filter pill (outlined)'],
+    // UNIVERSAL: Brand logo placeholder in navbar (non-text region)
+    ['brand_logo',        'shape', 'brand_logo', 0.6, 3.4, 24,  120,  24, 96, null, 'any',     'small',  12, 9, 'brand',    'Brand logo placeholder'],
     ['select_dropdown',   'shape', 'select',  1.5, 10.0, 40,  400,  18, 48,  null, 'any',      'small',  11, 8, 'select',   'Dropdown selector'],
     ['tab_bar',           'shape', 'toolbar', 3.0, 80.0, 200, 5000, 36, 60,  '(home|explore|search|profile|settings|feed|notifications)', 'any', 'none', 5, 8, 'tab-bar', 'Tab bar navigation'],
     ['icon_glyph',        'shape', 'icon',    0.65,1.35, 8,   80,   8,  80,  null, 'any',      'any',    14, 8, 'icon',     'Icon glyph or badge'],
@@ -363,6 +366,7 @@ async function populateInitialData() {
     ['hero_section', '<section style="{{style}}">{{content}}</section>', null],
     ['footer_panel', '<footer style="{{style}}">{{content}}</footer>', null],
     ['icon_glyph', '<div style="{{style}}" aria-hidden="true"></div>', null],
+    ['brand_logo', '<div style="{{style}}" aria-hidden="true"></div>', null],
     ['avatar_circle', '<div style="{{style}}" aria-hidden="true"></div>', null],
     ['sticky_navbar', '<nav style="{{style}}">{{content}}</nav>', null],
     ['display_heading', '<div style="{{style}}">{{text}}</div>', null],

@@ -18,10 +18,15 @@ backend/uploads/*
 # Database
 backend/database.sqlite
 backend/database.json
+backend/*.db
 
 # Logs
 *.log
 npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
 
 # OS
 .DS_Store
