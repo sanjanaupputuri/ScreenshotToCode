@@ -4,11 +4,7 @@ import { auth, googleProvider } from "./firebase";
 import HomeScreen from "./components/HomeScreen";
 import LoginScreen from "./components/LoginScreen";
 import ChatScreen from "./components/ChatScreen";
-<<<<<<< HEAD
 import ToastContainer from "./components/Toast";
-=======
-import { shellStyles } from "./theme";
->>>>>>> refine_sanjana
 
 export default function App() {
   const [screen, setScreen] = useState("home");
@@ -33,7 +29,6 @@ export default function App() {
   };
 
   return (
-<<<<<<< HEAD
     <>
       {/* Single persistent ambient glow */}
       <div aria-hidden="true" style={{
@@ -56,24 +51,5 @@ export default function App() {
 
       <ToastContainer />
     </>
-=======
-    <div style={shellStyles.page}>
-      {screen === "home" && (
-        <HomeScreen onGetStarted={() => setScreen("login")} />
-      )}
-
-      {screen === "login" && (
-        <LoginScreen
-          onLogin={handleGoogleLogin}
-          onBack={() => { setLoginError(""); setScreen("home"); }}
-          error={loginError}
-        />
-      )}
-
-      {screen === "chat" && user && (
-        <ChatScreen user={user} onLogout={handleLogout} />
-      )}
-    </div>
->>>>>>> refine_sanjana
   );
 }
