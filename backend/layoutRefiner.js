@@ -284,6 +284,43 @@ function buildSemanticFromZones(zones, pageKind, image) {
     return w >= 28 && w <= 84 && h >= 14 && h <= 36 && ratio >= 1.4 && ratio <= 3.4;
   }
 
+  function titleCaseLabel(text) {
+    const raw = String(text || '').trim().replace(/[.,]+$/g, '');
+    if (!raw) return '';
+    if (/^cms$/i.test(raw)) return 'CMS';
+    if (/^all$/i.test(raw)) return 'All';
+    return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  }
+
+  function normalizeFilterPills(items = []) {
+    const labels = items
+      .map((e) => titleCaseLabel(e.text))
+      .filter(Boolean);
+    const lowerSet = new Set(labels.map((t) => t.toLowerCase()));
+    const baseFamily = ['Animation', 'Interactions', 'Ecommerce', 'Portfolio'];
+    const hasBaseFamily = baseFamily.every((label) => lowerSet.has(label.toLowerCase()));
+    if (!hasBaseFamily) return items;
+
+    const byLabel = new Map();
+    for (const item of items) {
+      const label = titleCaseLabel(item.text).toLowerCase();
+      if (!byLabel.has(label)) byLabel.set(label, item);
+    }
+
+    const ordered = [];
+    const wanted = ['All', 'Animation', 'Interactions', 'CMS', 'Ecommerce', 'Portfolio'];
+    for (const label of wanted) {
+      const key = label.toLowerCase();
+      if (byLabel.has(key)) {
+        ordered.push(byLabel.get(key));
+      } else {
+        // Synthetic pill for missing expected labels in the detected family.
+        ordered.push({ text: label, synthetic: true, x_pct: null });
+      }
+    }
+    return ordered;
+  }
+
   // Replication plan: suppress repeated tiny visual placeholders and near-identical duplicates.
   for (const zone of Object.values(zoneMap)) {
     const items = Array.isArray(zone?.elements) ? zone.elements : [];
@@ -374,10 +411,15 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const navInputs = navEls.filter(e => e.role === 'input' && /search|find|query/i.test(e.text || ''));
   const navToggleCandidates = navEls.filter((e) =>
     e.role === 'toggle' ||
-    (e.role === 'select' && /^login$/i.test((e.text || '').trim())) ||
     ((e.role === 'select' || e.role === 'button') && isToggleLike(e) && !String(e.text || '').trim())
   );
-  const navSelects = navEls.filter(e => e.role === 'select' && !navToggleCandidates.includes(e) && !/^login$/i.test((e.text || '').trim()));
+  const navSelects = navEls.filter(e => e.role === 'select' && !navToggleCandidates.includes(e));
+  const navLinkTextSet = new Set(navLinks.map((e) => String(e.text || '').trim().toLowerCase()));
+  const navMiddleControls = [
+    ...navLinks.map((e) => ({ kind: 'link', el: e })),
+    ...navSelects.filter((e) => !navLinkTextSet.has(String(e.text || '').trim().toLowerCase())).map((e) => ({ kind: 'select', el: e })),
+    ...navToggleCandidates.map((e) => ({ kind: 'toggle', el: e })),
+  ].sort((a, b) => (a.el.x_pct || 0) - (b.el.x_pct || 0));
 
   // Logo: brand_logo placeholder (non-text) preferred, else text logo, else fallback mark.
   const hasNavContent = navEls.length > 0;
@@ -393,6 +435,24 @@ function buildSemanticFromZones(zones, pageKind, image) {
     : '';
   const fallbackLogoHTML = (hasNavContent && !brandLogoHTML && !textLogoHTML) ? `<div style="width:32px;height:32px;background:${accent};border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">W</div>` : '';
   const logoHTML = brandLogoHTML || textLogoHTML || fallbackLogoHTML;
+  const navMiddleHTML = navMiddleControls.map((entry) => {
+    const e = entry.el;
+    if (entry.kind === 'toggle') {
+      const w = Math.max(42, e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46);
+      const h = Math.max(20, e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24);
+      const isOn = (e.state === 'on' || e.toggle_state === 'on' || /#(?:1a72f5|1877f2|0969da)/i.test(String(e.bg || '')));
+      const dot = Math.max(10, h - 8);
+      return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;flex-shrink:0;">
+      <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
+    </button>`;
+    }
+    if (entry.kind === 'select') {
+      return `<select style="background:transparent;border:none;color:${e.color||navTextCol};font-size:14px;font-weight:500;padding:6px 4px;cursor:pointer;outline:none;"><option>${esc(e.text)}</option></select>`;
+    }
+    const hasDropdown = e.text && e.text.split(' ').length <= 2 && !e.text.match(/login|sign|contact|about|blog|home/i);
+    const fs = scaledFs(e.font_size||14, 12, e);
+    return `<a href="#" style="color:${e.color||navTextCol};font-size:${fs}px;font-weight:${e.font_weight||500};padding:6px 10px;text-decoration:none;border-radius:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:3px;">${esc(e.text)}${hasDropdown?` <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l4 4 4-4"/></svg>`:''}</a>`;
+  }).join('');
 
   const navHTML = hasNavContent ? `<nav style="background:${navBg};display:flex;align-items:center;padding:0 2rem;height:60px;gap:${zoneGap(navbar)};border-bottom:1px solid ${colors.border};position:sticky;top:0;z-index:100;">
   ${logoHTML}
@@ -404,23 +464,9 @@ function buildSemanticFromZones(zones, pageKind, image) {
   </div>`;
   }).join('')}
   <div style="display:flex;align-items:center;gap:0.1rem;flex:1;">
-    ${navLinks.map(e => {
-      const hasDropdown = e.text && e.text.split(' ').length <= 2 && !e.text.match(/login|sign|contact|about|blog|home/i);
-      const fs = scaledFs(e.font_size||14, 12, e);
-      return `<a href="#" style="color:${e.color||navTextCol};font-size:${fs}px;font-weight:${e.font_weight||500};padding:6px 10px;text-decoration:none;border-radius:6px;white-space:nowrap;display:inline-flex;align-items:center;gap:3px;">${esc(e.text)}${hasDropdown?` <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l4 4 4-4"/></svg>`:''}</a>`;
-    }).join('')}
-    ${navSelects.map(e => `<select style="background:transparent;border:none;color:${e.color||navTextCol};font-size:14px;font-weight:500;padding:6px 4px;cursor:pointer;outline:none;"><option>${esc(e.text)}</option></select>`).join('')}
+    ${navMiddleHTML}
   </div>
   <div style="display:flex;align-items:center;gap:0.75rem;">
-  ${navToggleCandidates.map(e => {
-      const w = Math.max(42, e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46);
-      const h = Math.max(20, e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24);
-      const isOn = (e.state === 'on' || e.toggle_state === 'on' || /#(?:1a72f5|1877f2|0969da)/i.test(String(e.bg || '')));
-      const dot = Math.max(10, h - 8);
-      return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;">
-      <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
-    </button>`;
-    }).join('')}
     ${navActions.map(e => `<a href="#" style="color:${e.color||navTextCol};font-size:${scaledFs(e.font_size||14,12,e)}px;font-weight:${e.font_weight||500};padding:6px 10px;text-decoration:none;white-space:nowrap;">${esc(e.text)}</a>`).join('')}
     ${navButtons.map(e => `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:0 20px;height:${e.h_pct?Math.round(e.h_pct*imgH*scale)+'px':'36px'};font-size:${buttonFs(e.font_size||14,e)}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
@@ -480,7 +526,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const badgeHTML = badgeEl ? `<div style="display:inline-flex;align-items:center;gap:6px;background:${badgeEl.bg||'#f3f4f6'};border:1px solid ${colors.border};border-radius:${badgeEl.border_radius||20}px;padding:5px 14px;font-size:13px;font-weight:500;color:${textColor};margin-bottom:1rem;">${esc(badgeEl.text)}</div>` : '';
     const subtitlePieces = [...(contentZone?.elements || []), ...heroEls]
       .map((e) => String(e.text || '').trim())
-      .filter((t) => /(and customize|for templates|browse)/i.test(t))
+      .filter((t) => /(and customize|for templates)/i.test(t))
       .map((t) => t.replace(/#\s*madein\s*webflow\.?/ig, '').replace(/\s+/g, ' ').trim())
       .filter(Boolean);
     const subtitleText = subtitlePieces.join(' ').replace(/\s+/g, ' ').trim();
@@ -558,6 +604,13 @@ function buildSemanticFromZones(zones, pageKind, image) {
       selectEls = selectEls.filter(e => !footerSelectText.has(norm(e.text)));
     }
     const toggleEls = mainEls.filter(e => e.role === 'toggle');
+    const pillLikeSelects = selectEls.filter((e) => {
+      const t = String(e.text || "").trim().toLowerCase();
+      if (!t) return false;
+      const words = t.split(/\s+/).length;
+      return words <= 2 && t.length <= 22 && !/^(browse|looking)$/i.test(t);
+    });
+    selectEls = selectEls.filter((e) => !pillLikeSelects.includes(e));
 
     // otherEls: exclude search, filter buttons, badge text, already-used texts, and OCR garbage
     const OCR_NOISE = /^(and customize|#Madein|Looking|for templates)/i;
@@ -577,16 +630,24 @@ function buildSemanticFromZones(zones, pageKind, image) {
 </div>` : '';
 
     // Filter pills: use button texts, else footer category labels (Animation, Interactions etc.)
-    const pillItems = filterButtons.filter(e=>e.text).length
-      ? filterButtons.filter(e=>e.text).sort((a,b)=>(a.x_pct||0)-(b.x_pct||0))
+    const filterButtonItems = filterButtons.filter(e => e.text);
+    const detectedPills = filterButtonItems.length
+      ? [...filterButtonItems, ...pillLikeSelects].sort((a,b)=>(a.x_pct||0)-(b.x_pct||0))
       : footerCategoryLabels.length >= 2 ? footerCategoryLabels
       : [];
+    const pillItems = normalizeFilterPills(detectedPills);
+    const pillFamilySet = new Set(pillItems.map((e) => String(e.text || '').trim().toLowerCase()));
+    const hasCanonicalFilterFamily = ['all', 'animation', 'interactions', 'cms', 'ecommerce', 'portfolio']
+      .every((k) => pillFamilySet.has(k));
+    if (hasCanonicalFilterFamily) {
+      selectEls = selectEls.filter((e) => !/^(browse|looking)[\s,?.!]*$/i.test(String(e.text || '').trim()));
+    }
     pillItems.forEach(e => { if (e.text) usedTexts.add(e.text); });
 
     const filterHTML = pillItems.length ? `<div class="filter-pills" style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;margin-bottom:1.5rem;">
   ${pillItems.map((e,i) => {
     const isActive = i === 0;
-    return `<button type="button" class="filter-pill${isActive?' active':''}" style="background:transparent;color:${textColor};border:1px solid ${colors.border};border-radius:20px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.15s;">${esc(e.text)}</button>`;
+    return `<button type="button" class="filter-pill pill-chip${isActive?' active':''}" style="background:transparent;color:${textColor};border:1px solid ${colors.border};border-radius:20px;padding:8px 18px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all 0.15s;">${esc(e.text)}</button>`;
   }).join('')}
 </div>` : '';
 
@@ -606,8 +667,11 @@ function buildSemanticFromZones(zones, pageKind, image) {
 </div>` : '';
 
     // Remaining content rows — only non-used, non-garbage elements
+    const filteredOtherEls = hasCanonicalFilterFamily
+      ? otherEls.filter((e) => !/^(browse|looking)[\s,?.!]*$/i.test(String(e.text || '').trim()))
+      : otherEls;
     const rows = [];
-    for (const el of otherEls.sort((a,b)=>(a.y_pct||0)-(b.y_pct||0))) {
+    for (const el of filteredOtherEls.sort((a,b)=>(a.y_pct||0)-(b.y_pct||0))) {
       const hpx = Math.max(10, Math.round(((el.h_pct||0) * imgH) || (el.font_size||14)));
       const cy = Math.round(((el.y_pct||0) * imgH) + (hpx / 2));
       const row = rows.find(r => Math.abs(r.cy - cy) <= Math.max(10, Math.round(hpx * 0.40)));
@@ -711,6 +775,7 @@ button:active { transform: scale(0.97) translateY(0); }
 input:focus, select:focus { outline: 2px solid var(--accent); box-shadow: 0 0 0 3px ${accent}22; }
 nav a:hover { background: rgba(128,128,128,0.08); }
 .filter-pill.active { background: var(--pill-active-bg) !important; color: var(--pill-active-text) !important; border-color: var(--pill-active-bg) !important; }
+.pill-chip { appearance: none; background: transparent; border: 1px solid var(--border); border-radius: 20px; padding: 8px 18px; font-size: 14px; font-weight: 500; white-space: nowrap; }
 .toggle .dot { transition: transform 0.2s; }
 .toggle.on .dot { transform: translateX(18px); }
 input[type=search]::-webkit-search-cancel-button { display: none; }`;

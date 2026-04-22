@@ -41,7 +41,7 @@ export const shellStyles = {
       "radial-gradient(circle at top left, rgba(24,119,242,0.10), transparent 30%), radial-gradient(circle at bottom right, rgba(46,125,50,0.06), transparent 24%), linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%)",
     color: theme.colors.text,
     fontFamily: theme.typography.fontFamily,
-    overflow: "hidden",
+    overflowY: "auto",
   },
   panel: {
     background: theme.colors.panel,

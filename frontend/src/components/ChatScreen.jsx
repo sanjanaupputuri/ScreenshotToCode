@@ -358,7 +358,7 @@ export default function ChatScreen({ user, onLogout }) {
   return (
     <div style={{
       position: "relative", zIndex: 10, display: "flex",
-      flexDirection: "column", minHeight: "100vh", color: theme.colors.text
+      flexDirection: "column", minHeight: "100vh", height: "100vh", color: theme.colors.text
     }}>
       {/* Header */}
       <div style={{
@@ -408,7 +408,7 @@ export default function ChatScreen({ user, onLogout }) {
 
       {/* Messages */}
       <div style={{
-        flex: 1, overflowY: "auto", padding: "1.25rem 1.5rem",
+        flex: 1, minHeight: 0, overflowY: "auto", padding: "1.25rem 1.5rem",
         display: "flex", flexDirection: "column", gap: "1rem",
         background: "rgba(240,242,245,0.5)"
       }}>
