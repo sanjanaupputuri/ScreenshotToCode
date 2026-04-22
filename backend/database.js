@@ -713,6 +713,9 @@ function scoreProfileMatch(element, profile) {
 
   const rawType = element.type || '';
   const profileType = profile.target_type || '';
+  // Prevent obvious cross-type flips that create false inputs/search bars.
+  // If OpenCV detected a button/chip, do not reclassify it as an input template.
+  if ((rawType === 'button' || rawType === 'chip') && profileType === 'input') return -Infinity;
   if (rawType && profileType) {
     if (rawType === profileType) score += 2.0;
     else if (rawType !== 'shape' && rawType !== 'text') score -= 1.0;

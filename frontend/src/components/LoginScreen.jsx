@@ -1,3 +1,5 @@
+import { shellStyles, theme } from "../theme";
+
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18">
     <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
@@ -11,17 +13,16 @@ export default function LoginScreen({ onLogin, onBack, error }) {
   return (
     <div style={{
       position: "relative", zIndex: 10, display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", height: "100%",
-      color: "#1c1e21", gap: "1.5rem"
+      alignItems: "center", justifyContent: "center", minHeight: "100vh",
+      color: theme.colors.text, gap: "1.5rem", padding: "2rem"
     }}>
       <div style={{
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(16px)",
-        borderRadius: "16px", padding: "2.5rem 3rem", border: "1px solid #dddfe2",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.08)", display: "flex",
+        ...shellStyles.panel,
+        padding: "2.5rem 3rem", display: "flex",
         flexDirection: "column", alignItems: "center", gap: "1.5rem", minWidth: "320px"
       }}>
-        <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "#1877f2" }}>Welcome back</div>
-        <div style={{ fontSize: "0.9rem", color: "#606770", textAlign: "center" }}>
+        <div style={{ fontSize: "1.8rem", fontWeight: 800, color: theme.colors.accent }}>Welcome back</div>
+        <div style={{ fontSize: "0.9rem", color: theme.colors.muted, textAlign: "center" }}>
           Sign in to start converting screenshots to code
         </div>
 
@@ -29,7 +30,7 @@ export default function LoginScreen({ onLogin, onBack, error }) {
           <div style={{
             padding: "0.75rem 1rem", borderRadius: "8px",
             background: "#fff0f0", border: "1px solid #ffcdd2",
-            color: "#c62828", fontSize: "0.85rem", width: "100%", textAlign: "center"
+            color: theme.colors.error, fontSize: "0.85rem", width: "100%", textAlign: "center"
           }}>
             {error}
           </div>
@@ -39,13 +40,13 @@ export default function LoginScreen({ onLogin, onBack, error }) {
           onClick={onLogin}
           style={{
             padding: "0.85rem 2rem", borderRadius: "8px", border: "1px solid #dddfe2",
-            background: "#ffffff", color: "#1c1e21", fontSize: "0.95rem",
+            background: "#ffffff", color: theme.colors.text, fontSize: "0.95rem",
             fontWeight: 600, cursor: "pointer", transition: "all 0.3s",
             display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem",
             boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)", width: "100%"
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; e.currentTarget.style.background = "#f8f9fa"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)"; e.currentTarget.style.background = "#ffffff"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; e.currentTarget.style.background = "#f8f9fa"; e.currentTarget.style.borderColor = theme.colors.borderStrong; }}
+          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.1)"; e.currentTarget.style.background = "#ffffff"; e.currentTarget.style.borderColor = "#dddfe2"; }}
         >
           <GoogleIcon />
           Sign in with Google
@@ -54,12 +55,12 @@ export default function LoginScreen({ onLogin, onBack, error }) {
         <button
           onClick={onBack}
           style={{
-            background: "none", border: "none", color: "#1877f2",
+            background: "none", border: "none", color: theme.colors.accent,
             cursor: "pointer", fontSize: "0.9rem",
             transition: "color 0.2s", padding: 0
           }}
-          onMouseEnter={(e) => e.currentTarget.style.color = "#166fe5"}
-          onMouseLeave={(e) => e.currentTarget.style.color = "#1877f2"}
+          onMouseEnter={(e) => e.currentTarget.style.color = theme.colors.accentHover}
+          onMouseLeave={(e) => e.currentTarget.style.color = theme.colors.accent}
         >
           ← Back to home
         </button>

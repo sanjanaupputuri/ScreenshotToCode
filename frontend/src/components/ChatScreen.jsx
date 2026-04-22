@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
+import { theme } from "../theme";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 
@@ -23,14 +24,14 @@ function CodeBlock({ code, onSave, saving, saved }) {
       {/* Tab bar */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "0.5rem 1rem", borderBottom: "1px solid #dddfe2", background: "#f8f9fa"
+        padding: "0.5rem 1rem", borderBottom: `1px solid ${theme.colors.border}`, background: "#f8f9fa"
       }}>
         <div style={{ display: "flex", gap: 4 }}>
           {["code", "preview"].map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: "0.3rem 0.75rem", borderRadius: 6, border: "none",
-              background: tab === t ? "#1877f2" : "transparent",
-              color: tab === t ? "#fff" : "#606770",
+              background: tab === t ? theme.colors.accent : "transparent",
+              color: tab === t ? "#fff" : theme.colors.muted,
               fontSize: "0.78rem", fontWeight: 600, cursor: "pointer"
             }}>
               {t === "code" ? "💻 Code" : "👁️ Preview"}
@@ -40,18 +41,18 @@ function CodeBlock({ code, onSave, saving, saved }) {
         <div style={{ display: "flex", gap: 6 }}>
           <button onClick={copy} style={{
             padding: "0.3rem 0.75rem", borderRadius: 6,
-            border: "1px solid #dddfe2",
+            border: `1px solid ${theme.colors.border}`,
             background: copied ? "#e6f4ea" : "#fff",
-            color: copied ? "#2e7d32" : "#606770",
+            color: copied ? theme.colors.success : theme.colors.muted,
             fontSize: "0.78rem", cursor: "pointer"
           }}>
             {copied ? "✓ Copied" : "📋 Copy"}
           </button>
           <button onClick={onSave} disabled={saving || saved} style={{
             padding: "0.3rem 0.75rem", borderRadius: 6,
-            border: "1px solid #dddfe2",
+            border: `1px solid ${theme.colors.border}`,
             background: saved ? "#e6f4ea" : saving ? "#f0f2f5" : "#fff",
-            color: saved ? "#2e7d32" : saving ? "#aaa" : "#606770",
+            color: saved ? theme.colors.success : saving ? "#aaa" : theme.colors.muted,
             fontSize: "0.78rem", cursor: saving || saved ? "default" : "pointer"
           }}>
             {saved ? "✓ Saved" : saving ? "Saving…" : "💾 Save"}
@@ -63,7 +64,7 @@ function CodeBlock({ code, onSave, saving, saved }) {
         <pre style={{
           margin: 0, padding: "1rem", fontSize: "0.76rem", fontFamily: "monospace",
           whiteSpace: "pre-wrap", overflowY: "auto", maxHeight: 600,
-          color: "#1c1e21", lineHeight: 1.6, background: "#fafafa"
+          color: theme.colors.text, lineHeight: 1.6, background: "#fafafa"
         }}>
           {code}
         </pre>
@@ -91,7 +92,13 @@ function Message({ msg, onSave, saving, saved }) {
     }}>
       {msg.image && (
         <img src={msg.image} alt="screenshot" style={{
-          maxWidth: "100%", borderRadius: 10, border: "1px solid #dddfe2",
+          maxWidth: "100%", borderRadius: 10, border: `1px solid ${theme.colors.border}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 300, objectFit: "contain"
+        }} />
+      )}
+      {!msg.image && msg.imageUrl && (
+        <img src={msg.imageUrl} alt="screenshot" style={{
+          maxWidth: "100%", borderRadius: 10, border: `1px solid ${theme.colors.border}`,
           boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 300, objectFit: "contain"
         }} />
       )}
@@ -100,9 +107,9 @@ function Message({ msg, onSave, saving, saved }) {
       ) : (
         <div style={{
           padding: "0.8rem 1.1rem", borderRadius: 10,
-          background: isUser ? "#e7f3ff" : msg.isError ? "#fff0f0" : "#fff",
-          color: msg.isError ? "#c62828" : "#1c1e21",
-          border: isUser ? "1px solid #1877f2" : msg.isError ? "1px solid #ffcdd2" : "1px solid #dddfe2",
+          background: isUser ? theme.colors.accentSoft : msg.isError ? "#fff0f0" : "#fff",
+          color: msg.isError ? theme.colors.error : theme.colors.text,
+          border: isUser ? `1px solid ${theme.colors.accent}` : msg.isError ? "1px solid #ffcdd2" : `1px solid ${theme.colors.border}`,
           fontSize: "0.92rem", boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
         }}>
           {msg.text}
@@ -117,38 +124,38 @@ function HistoryPanel({ history, loading, onClose, onLoad }) {
   return (
     <div style={{
       position: "absolute", top: 0, right: 0, bottom: 0, width: 360,
-      background: "rgba(255,255,255,0.97)", backdropFilter: "blur(16px)",
-      borderLeft: "1px solid #dddfe2", zIndex: 20,
+      background: theme.colors.panelStrong, backdropFilter: "blur(16px)",
+      borderLeft: `1px solid ${theme.colors.border}`, zIndex: 20,
       display: "flex", flexDirection: "column",
       boxShadow: "-4px 0 20px rgba(0,0,0,0.08)"
     }}>
       <div style={{
-        padding: "1.1rem 1.4rem", borderBottom: "1px solid #dddfe2",
+        padding: "1.1rem 1.4rem", borderBottom: `1px solid ${theme.colors.border}`,
         display: "flex", justifyContent: "space-between", alignItems: "center"
       }}>
-        <span style={{ fontWeight: 700, color: "#1877f2" }}>📜 Saved History</span>
+        <span style={{ fontWeight: 800, color: theme.colors.accent }}>📜 Saved History</span>
         <button onClick={onClose} style={{
           background: "none", border: "none", cursor: "pointer",
-          color: "#606770", fontSize: "1.1rem"
+          color: theme.colors.muted, fontSize: "1.1rem"
         }}>✕</button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
         {loading ? (
-          <div style={{ textAlign: "center", color: "#606770", marginTop: "2rem" }}>Loading…</div>
+          <div style={{ textAlign: "center", color: theme.colors.muted, marginTop: "2rem" }}>Loading…</div>
         ) : history.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#606770", marginTop: "2rem", fontSize: "0.9rem" }}>
+          <div style={{ textAlign: "center", color: theme.colors.muted, marginTop: "2rem", fontSize: "0.9rem" }}>
             No saved generations yet
           </div>
         ) : history.map(item => (
           <div key={item.id}
             onClick={() => onLoad(item)}
             style={{
-              padding: "0.85rem", borderRadius: 8, border: "1px solid #dddfe2",
+              padding: "0.85rem", borderRadius: 8, border: `1px solid ${theme.colors.border}`,
               marginBottom: "0.6rem", background: "#f8f9fa", cursor: "pointer",
               transition: "all 0.2s"
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = "#1877f2"; e.currentTarget.style.background = "#e7f3ff"; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = "#dddfe2"; e.currentTarget.style.background = "#f8f9fa"; }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.background = theme.colors.accentSoft; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.background = "#f8f9fa"; }}
           >
             {item.image_url && (
               <img
@@ -158,10 +165,10 @@ function HistoryPanel({ history, loading, onClose, onLoad }) {
                 onError={e => e.target.style.display = "none"}
               />
             )}
-            <div style={{ fontSize: "0.72rem", color: "#606770" }}>
+            <div style={{ fontSize: "0.72rem", color: theme.colors.muted }}>
               {new Date(item.created_at).toLocaleString()}
             </div>
-            <div style={{ fontSize: "0.78rem", color: "#1877f2", marginTop: 3 }}>
+            <div style={{ fontSize: "0.78rem", color: theme.colors.accent, marginTop: 3 }}>
               Click to load →
             </div>
           </div>
@@ -174,7 +181,7 @@ function HistoryPanel({ history, loading, onClose, onLoad }) {
 // ── StatusBar ─────────────────────────────────────────────────────────────────
 function StatusDot({ label, up }) {
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: "#606770" }}>
+    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: theme.colors.muted }}>
       <span style={{
         width: 7, height: 7, borderRadius: "50%",
         background: up ? "#10b981" : "#ef4444",
@@ -351,16 +358,16 @@ export default function ChatScreen({ user, onLogout }) {
   return (
     <div style={{
       position: "relative", zIndex: 10, display: "flex",
-      flexDirection: "column", height: "100%", color: "#1c1e21"
+      flexDirection: "column", minHeight: "100vh", color: theme.colors.text
     }}>
       {/* Header */}
       <div style={{
-        padding: "0.85rem 1.5rem", borderBottom: "1px solid #dddfe2",
+        padding: "0.85rem 1.5rem", borderBottom: `1px solid ${theme.colors.border}`,
         display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)", flexShrink: 0
+        background: theme.colors.panel, backdropFilter: "blur(10px)", flexShrink: 0
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: "1.1rem", fontWeight: 700, color: "#1877f2" }}>
+          <span style={{ fontSize: "1.1rem", fontWeight: 800, color: theme.colors.accent }}>
             📸 Screenshot to Code
           </span>
           <div style={{ display: "flex", gap: 10 }}>
@@ -371,28 +378,28 @@ export default function ChatScreen({ user, onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {user?.photoURL && (
             <img src={user.photoURL} alt="avatar" style={{
-              width: 28, height: 28, borderRadius: "50%", border: "2px solid #1877f2"
+              width: 28, height: 28, borderRadius: "50%", border: `2px solid ${theme.colors.accent}`
             }} />
           )}
-          <span style={{ fontSize: "0.82rem", color: "#606770" }}>
+          <span style={{ fontSize: "0.82rem", color: theme.colors.muted }}>
             {user?.displayName || user?.email}
           </span>
           <button onClick={handleOpenHistory} style={{
-            background: "none", border: "1px solid #dddfe2", borderRadius: 6,
-            color: "#606770", cursor: "pointer", fontSize: "0.82rem",
+            background: "none", border: `1px solid ${theme.colors.border}`, borderRadius: 6,
+            color: theme.colors.muted, cursor: "pointer", fontSize: "0.82rem",
             padding: "0.3rem 0.7rem", transition: "all 0.2s"
           }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1877f2"; e.currentTarget.style.color = "#1877f2"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = "#dddfe2"; e.currentTarget.style.color = "#606770"; }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.color = theme.colors.accent; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.color = theme.colors.muted; }}
           >
             📜 History
           </button>
           <button onClick={onLogout} style={{
-            background: "none", border: "none", color: "#606770",
+            background: "none", border: "none", color: theme.colors.muted,
             cursor: "pointer", fontSize: "0.82rem"
           }}
-          onMouseEnter={e => e.currentTarget.style.color = "#c62828"}
-          onMouseLeave={e => e.currentTarget.style.color = "#606770"}
+          onMouseEnter={e => e.currentTarget.style.color = theme.colors.error}
+          onMouseLeave={e => e.currentTarget.style.color = theme.colors.muted}
           >
             Sign out
           </button>
@@ -406,9 +413,9 @@ export default function ChatScreen({ user, onLogout }) {
         background: "rgba(240,242,245,0.5)"
       }}>
         {messages.length === 0 && (
-          <div style={{ margin: "auto", textAlign: "center", color: "#606770" }}>
+        <div style={{ margin: "auto", textAlign: "center", color: theme.colors.muted }}>
             <div style={{ fontSize: "3rem", marginBottom: 10 }}>📸</div>
-            <div style={{ fontWeight: 600, color: "#1c1e21", marginBottom: 6 }}>
+            <div style={{ fontWeight: 700, color: theme.colors.text, marginBottom: 6 }}>
               Upload a UI screenshot to get started
             </div>
             <div style={{ fontSize: "0.85rem", maxWidth: 380, lineHeight: 1.6 }}>
@@ -417,12 +424,12 @@ export default function ChatScreen({ user, onLogout }) {
             </div>
             <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               {["🔍 OpenCV Detection", "🗄️ SQLite Templates", "🤖 Ollama Generation"].map(s => (
-                <span key={s} style={{
-                  padding: "0.3rem 0.8rem", borderRadius: 20,
-                  background: "rgba(24,119,242,0.08)", border: "1px solid rgba(24,119,242,0.2)",
-                  color: "#1877f2", fontSize: "0.78rem"
-                }}>{s}</span>
-              ))}
+              <span key={s} style={{
+                padding: "0.3rem 0.8rem", borderRadius: 20,
+                background: "rgba(24,119,242,0.08)", border: "1px solid rgba(24,119,242,0.2)",
+                  color: theme.colors.accent, fontSize: "0.78rem"
+              }}>{s}</span>
+            ))}
             </div>
           </div>
         )}
@@ -438,11 +445,11 @@ export default function ChatScreen({ user, onLogout }) {
         ))}
 
         {loading && (
-          <div style={{ alignSelf: "flex-start" }}>
-            <div style={{
+        <div style={{ alignSelf: "flex-start" }}>
+              <div style={{
               padding: "0.8rem 1.1rem", borderRadius: 10,
-              background: "#fff", border: "1px solid #dddfe2",
-              color: "#606770", fontSize: "0.88rem",
+              background: "#fff", border: `1px solid ${theme.colors.border}`,
+              color: theme.colors.muted, fontSize: "0.88rem",
               display: "flex", alignItems: "center", gap: 8
             }}>
               <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⚙️</span>
@@ -456,7 +463,7 @@ export default function ChatScreen({ user, onLogout }) {
 
       {/* Input bar */}
       <div style={{
-        padding: "0.85rem 1.5rem", borderTop: "1px solid #dddfe2",
+        padding: "0.85rem 1.5rem", borderTop: `1px solid ${theme.colors.border}`,
         display: "flex", gap: 10, alignItems: "center",
         background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)", flexShrink: 0
       }}>
@@ -472,14 +479,14 @@ export default function ChatScreen({ user, onLogout }) {
           disabled={loading}
           style={{
             flex: 1, padding: "0.8rem", borderRadius: 8,
-            border: "2px dashed #dddfe2",
+            border: `2px dashed ${theme.colors.border}`,
             background: loading ? "#f0f2f5" : "#fafafa",
-            color: loading ? "#aaa" : "#606770",
+            color: loading ? "#aaa" : theme.colors.muted,
             fontSize: "0.92rem", cursor: loading ? "not-allowed" : "pointer",
             transition: "all 0.2s", fontFamily: "inherit"
           }}
-          onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = "#1877f2"; e.currentTarget.style.background = "#e7f3ff"; e.currentTarget.style.color = "#1877f2"; } }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = "#dddfe2"; e.currentTarget.style.background = loading ? "#f0f2f5" : "#fafafa"; e.currentTarget.style.color = loading ? "#aaa" : "#606770"; }}
+          onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.background = theme.colors.accentSoft; e.currentTarget.style.color = theme.colors.accent; } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.background = loading ? "#f0f2f5" : "#fafafa"; e.currentTarget.style.color = loading ? "#aaa" : theme.colors.muted; }}
         >
           {loading ? "⚙️ Processing…" : "📁 Click to upload a screenshot (PNG, JPG, etc.)"}
         </button>

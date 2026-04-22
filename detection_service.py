@@ -21,6 +21,32 @@ SECTION_HEADING_PATTERN = re.compile(r"(readme|activity|releases|packages|sugges
 DROPDOWN_CHARS = re.compile(r"[∨▾▼⌄ˇ]|(\s*[vV]\s*$)")
 
 
+def make_json_safe(obj):
+    """
+    Convert numpy scalars/arrays (and other non-JSON-native values) into plain Python
+    types so json.dumps/jsonify won't fail.
+    """
+    try:
+        import numpy as _np
+    except Exception:
+        _np = None
+
+    if _np is not None:
+        if isinstance(obj, _np.generic):
+            return obj.item()
+        if isinstance(obj, _np.ndarray):
+            return obj.tolist()
+
+    if isinstance(obj, dict):
+        return {str(make_json_safe(k)): make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [make_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    # Fallback for any other unexpected types.
+    return str(obj)
+
+
 def has_dropdown_arrow(image_roi, x, y, w, h, full_image):
     """
     Check if there's a small downward-pointing chevron/arrow to the right of this region.
@@ -189,6 +215,70 @@ def collapse_duplicate_tokens(text):
         if collapsed:
             lines.append(" ".join(collapsed))
     return "\n".join(lines).strip()
+
+
+def looks_like_ocr_gibberish(text):
+    """
+    Heuristic filter for OCR hallucinations (often from shadows/photos).
+    Used only as a secondary gate when confidence is low.
+    """
+    if not text:
+        return True
+    t = " ".join(str(text).split()).strip()
+    if len(t) <= 1:
+        return True
+
+    tokens = re.findall(r"[A-Za-z0-9]+", t)
+    if not tokens:
+        return True
+
+    lower = [tok.lower() for tok in tokens]
+    GOOD_SHORT = {
+        'a','an','as','at','be','by','do','go','if','in','is','it','me','my','no','of','on','or','so','to','up','us','we',
+        'log','login','sign','pro','new','all','cms','ui','api','css','js','id',
+    }
+    good = sum(1 for tok in lower if tok in GOOD_SHORT)
+    unknown_short = sum(1 for tok in lower if (tok not in GOOD_SHORT) and len(tok) <= 4)
+
+    # If we have a clearly "word-like" longer token, keep.
+    for tok in tokens:
+        if any(ch.isdigit() for ch in tok):
+            return False
+        if len(tok) >= 7:
+            vowels = sum(1 for c in tok.lower() if c in "aeiou")
+            if vowels >= 2:
+                return False
+
+    # Repeated-letter junk (eee, aaa, etc.)
+    if any(re.search(r"(.)\1\1", tok.lower()) for tok in tokens):
+        return True
+
+    # Lots of tiny tokens without enough "good" short words = junk.
+    tiny = sum(1 for tok in tokens if len(tok) <= 2)
+    short = sum(1 for tok in tokens if len(tok) <= 3)
+    if len(tokens) >= 2 and short / len(tokens) > 0.75 and good < max(1, len(tokens) // 2):
+        return True
+    if len(tokens) >= 3 and tiny / len(tokens) > 0.5 and good < 2:
+        return True
+
+    # Two-token junk often appears as "esas Bas", "tas MOCO" at low confidence.
+    if len(tokens) == 2:
+        if all(len(tok) <= 4 for tok in tokens) and good < 2:
+            if any(tok.isupper() for tok in tokens) or any(tok[0].isupper() for tok in tokens):
+                return True
+    if len(tokens) >= 3 and all(len(tok) <= 4 for tok in tokens) and good < 2:
+        return True
+    # Mixed short common words + 1-2 unknown short tokens is often hallucinated text on images.
+    if len(tokens) >= 3 and max(len(tok) for tok in tokens) <= 4 and unknown_short >= 1:
+        return True
+
+    # Mostly uppercase short tokens (e.g. "ORS MOCO") at low confidence.
+    upper_short = sum(1 for tok in tokens if tok.isupper() and len(tok) <= 4)
+    if len(tokens) >= 2 and upper_short / len(tokens) > 0.6 and good < 2:
+        return True
+
+    # Default: keep.
+    return False
 
 
 def score_text_quality(text):
@@ -405,7 +495,22 @@ def dedupe_regions(regions):
             y_overlap = max(0, min(region["y"] + region["height"], existing["y"] + existing["height"]) - max(region["y"], existing["y"]))
             overlap_area = x_overlap * y_overlap
             smaller = min(region["width"] * region["height"], existing["width"] * existing["height"])
-            if smaller > 0 and overlap_area / smaller > 0.8:
+            overlap_ratio = (overlap_area / smaller) if smaller > 0 else 0.0
+            # Consider duplicates even when slightly shifted if text matches.
+            rt = (region.get("text") or "").strip()
+            et = (existing.get("text") or "").strip()
+            same_text = rt and rt == et
+            if same_text:
+                rcx = region["x"] + region["width"] / 2
+                rcy = region["y"] + region["height"] / 2
+                ecx = existing["x"] + existing["width"] / 2
+                ecy = existing["y"] + existing["height"] / 2
+                center_dist = ((rcx - ecx) ** 2 + (rcy - ecy) ** 2) ** 0.5
+                size_tol = max(6, min(region["width"], region["height"], existing["width"], existing["height"]) * 0.35)
+                if overlap_ratio > 0.35 and center_dist <= size_tol:
+                    duplicate = True
+                    break
+            if overlap_ratio > 0.8:
                 duplicate = True
                 break
 
@@ -621,7 +726,37 @@ def detect_text_regions(image):
     for region in merged:
         region["text"] = collapse_duplicate_tokens(region["text"])
         region["quality"] = score_text_quality(region["text"])
-    filtered = [region for region in merged if region.get("quality", 0) >= 0.22 and len(region.get("text", "")) >= 2]
+    # Suppress OCR hallucinations on photos/shading: high-variance regions with weak OCR confidence/quality.
+    def _is_noisy_ocr(region):
+        try:
+            x, y, w, h = int(region["x"]), int(region["y"]), int(region["width"]), int(region["height"])
+        except Exception:
+            return False
+        roi = crop(image, x, y, w, h)
+        if roi.size == 0:
+            return False
+        variance = float(np.std(roi.reshape(-1, 3).astype(np.float32)))
+        conf = float(region.get("confidence", 0) or 0)
+        quality = float(region.get("quality", 0) or 0)
+        fs = int(region.get("font_size", 0) or 0)
+        text = (region.get("text") or "").strip()
+        # Keep large/high-confidence text even on images (e.g. hero text over a photo).
+        if fs >= 24 and conf >= 75 and quality >= 0.6:
+            return False
+        # Typical hallucination: small-ish text, mediocre confidence, low quality, on high-variance background.
+        if variance > 85 and conf < 72 and quality < 0.55 and len(text) <= 28:
+            return True
+        # Another common case: very high variance (photos/icons) with marginal confidence.
+        if variance > 110 and conf < 80 and quality < 0.65:
+            return True
+        return False
+
+    filtered = [
+        region for region in merged
+        if region.get("quality", 0) >= 0.22
+        and len(region.get("text", "")) >= 2
+        and not _is_noisy_ocr(region)
+    ]
     return dedupe_regions(filtered)
 
 
@@ -793,11 +928,13 @@ def detect_toggle_switch_state(roi):
         return None
     h, w = roi.shape[:2]
     aspect = w / max(h, 1)
-    if not (28 <= w <= 70 and 14 <= h <= 36 and 1.5 <= aspect <= 2.6):
+    # Be tolerant: contour boxes for toggles are often slightly cropped.
+    if not (24 <= w <= 90 and 12 <= h <= 40 and 1.3 <= aspect <= 4.0):
         return None
 
     flat = roi.reshape(-1, 3).astype(np.float32)
     track_bgr = np.median(flat, axis=0)
+    track_luma = float(np.mean(track_bgr))
     track_var = float(np.std(flat))
     if track_var > 70:
         return None
@@ -814,7 +951,7 @@ def detect_toggle_switch_state(roi):
     for c in contours:
         x, y, cw, ch = cv2.boundingRect(c)
         area = cw * ch
-        if area < (w * h * 0.08) or area > (w * h * 0.60):
+        if area < (w * h * 0.12) or area > (w * h * 0.55):
             continue
         c_aspect = cw / max(ch, 1)
         if c_aspect < 0.65 or c_aspect > 1.55:
@@ -835,6 +972,9 @@ def detect_toggle_switch_state(roi):
         # Thumb is usually white/light.
         if thumb_luma < 160:
             continue
+        # Thumb should be noticeably lighter than the track.
+        if (thumb_luma - track_luma) < 8:
+            continue
 
         # Prefer larger, more circular blobs.
         score = area - abs(c_aspect - 1.0) * 120
@@ -845,6 +985,183 @@ def detect_toggle_switch_state(roi):
     if best is None:
         return None
     return "on" if best > (w / 2) else "off"
+
+
+def scan_for_toggles(image, existing_elements=None, page_background=None):
+    """
+    Dedicated toggle scanner (UNIVERSAL 1.5): find small pill switches that contour detection misses.
+    Scans likely footer/toolbar bands and returns new toggle elements in image coordinates.
+    """
+    if image is None or image.size == 0:
+        return []
+    img_h, img_w = image.shape[:2]
+    existing_elements = existing_elements or []
+
+    def _overlap_ratio(a, b):
+        ax0, ay0, aw, ah = a["x"], a["y"], a["width"], a["height"]
+        bx0, by0, bw, bh = b["x"], b["y"], b["width"], b["height"]
+        ax1, ay1 = ax0 + aw, ay0 + ah
+        bx1, by1 = bx0 + bw, by0 + bh
+        ox = max(0, min(ax1, bx1) - max(ax0, bx0))
+        oy = max(0, min(ay1, by1) - max(ay0, by0))
+        inter = ox * oy
+        if inter <= 0:
+            return 0.0
+        return inter / float(min(max(1, aw * ah), max(1, bw * bh)))
+
+    # Focus on bottom bands (footer/toolbars) and upper toolbar band.
+    bands = [
+        (int(img_h * 0.0), int(img_h * 0.16)),
+        # Lower footer band (exclude mid-page filter pills).
+        (int(img_h * 0.78), img_h),
+    ]
+
+    toggles = []
+
+    for y0, y1 in bands:
+        band_toggles = []
+        band_bgr = image[max(0, y0):min(img_h, y1), :, :]
+        if band_bgr.size == 0:
+            continue
+
+        # "Non-background" mask to catch subtle light-gray toggles on white backgrounds.
+        flat = band_bgr.reshape(-1, 3).astype(np.float32)
+        bg = np.median(flat, axis=0) if flat.size else np.array([255, 255, 255], dtype=np.float32)
+        dist = np.linalg.norm(band_bgr.astype(np.float32) - bg.reshape(1, 1, 3), axis=2)
+        mask = (dist > 8.5).astype(np.uint8) * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8), iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            y = y + y0
+            if w < 28 or h < 14 or w > 70 or h > 36:
+                continue
+            aspect = w / max(h, 1)
+            if aspect < 1.5 or aspect > 2.6:
+                continue
+            # Require rounded-rect-ish contour.
+            approx = cv2.approxPolyDP(c, 0.04 * cv2.arcLength(c, True), True)
+            if len(approx) < 4:
+                continue
+
+            roi = crop(image, x, y, w, h)
+            if roi.size == 0:
+                continue
+            state = detect_toggle_switch_state(roi)
+            if state is None:
+                continue
+
+            candidate = {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+            # Skip if overlaps an existing toggle/button/input heavily.
+            overlapped = False
+            for ex in existing_elements:
+                if ex.get("kind") != "shape":
+                    continue
+                if ex.get("type") not in ("toggle", "button", "input", "chip"):
+                    continue
+                if _overlap_ratio(candidate, ex) > 0.55:
+                    overlapped = True
+                    break
+            if overlapped:
+                continue
+
+            # Estimate fill/border quickly for rendering/templates.
+            mask = np.ones((h, w), dtype=np.uint8) * 255
+            fill_hex, border_hex, border_width, border_radius = estimate_border_and_fill(roi, mask)
+
+            band_toggles.append({
+                "kind": "shape",
+                "type": "toggle",
+                "text": "",
+                "_direct_text": "",
+                "toggle_state": state,
+                "x": int(x),
+                "y": int(y),
+                "width": int(w),
+                "height": int(h),
+                "area": int(w * h),
+                "background_color": fill_hex,
+                "border_color": border_hex,
+                "border_width": int(max(1, border_width)),
+                "border_radius": int(max(border_radius, round(h / 2))),
+                "text_color": "transparent",
+                "font_size": 0,
+                "font_weight": 0,
+                "text_align": "left",
+                "z_index": 11,
+                "linked_text_count": 0,
+                "nesting_level": 0,
+            })
+
+        # Fallback: brute scan within this band if contours missed the toggle (common on light UIs).
+        # Only run for lower bands to avoid false positives in dense navbars.
+        if not band_toggles and y0 >= int(img_h * 0.50) and (y1 - y0) > 40:
+            sizes = [(28, 14), (32, 16), (36, 18), (40, 20), (44, 22), (48, 24), (52, 26), (56, 28), (60, 30)]
+            max_w = max(w for w, _ in sizes)
+            max_h = max(h for _, h in sizes)
+            y_start = max(0, y0)
+            y_end = min(img_h - max_h, y1)
+            # Coarse stride keeps it fast; detect_toggle_switch_state is the real gate.
+            for yy in range(y_start, y_end, 6):
+                for xx in range(0, img_w - max_w, 6):
+                    for tw, th in sizes:
+                        roi = image[yy:yy + th, xx:xx + tw]
+                        if roi.size == 0:
+                            continue
+                        state = detect_toggle_switch_state(roi)
+                        if state is None:
+                            continue
+                        candidate = {"x": int(xx), "y": int(yy), "width": int(tw), "height": int(th)}
+                        overlapped = False
+                        for ex in existing_elements:
+                            if ex.get("kind") != "shape":
+                                continue
+                            if ex.get("type") not in ("toggle", "button", "input", "chip"):
+                                continue
+                            if _overlap_ratio(candidate, ex) > 0.55:
+                                overlapped = True
+                                break
+                        if overlapped:
+                            continue
+
+                        mask = np.ones((th, tw), dtype=np.uint8) * 255
+                        fill_hex, border_hex, border_width, border_radius = estimate_border_and_fill(roi, mask)
+                        band_toggles.append({
+                            "kind": "shape",
+                            "type": "toggle",
+                            "text": "",
+                            "_direct_text": "",
+                            "toggle_state": state,
+                            "x": int(xx),
+                            "y": int(yy),
+                            "width": int(tw),
+                            "height": int(th),
+                            "area": int(tw * th),
+                            "background_color": fill_hex,
+                            "border_color": border_hex,
+                            "border_width": int(max(1, border_width)),
+                            "border_radius": int(max(border_radius, round(th / 2))),
+                            "text_color": "transparent",
+                            "font_size": 0,
+                            "font_weight": 0,
+                            "text_align": "left",
+                            "z_index": 11,
+                            "linked_text_count": 0,
+                            "nesting_level": 0,
+                        })
+                        break
+                    if band_toggles:
+                        break
+                if band_toggles:
+                    break
+
+        if band_toggles:
+            toggles.extend(band_toggles)
+
+    return toggles
 
 
 def shape_type(x, y, w, h, text_count, image_w, image_h, fill_bgr, border_width,
@@ -1151,6 +1468,35 @@ def detect_shape_regions(image, text_regions, page_background):
             if within:
                 linked_texts.append(region)
 
+        # UNIVERSAL: Toggle switches are two-tone (track + thumb) and fail solidity checks.
+        # Detect toggles before applying solidity-based rejection.
+        toggle_state = detect_toggle_switch_state(roi)
+        if toggle_state is not None:
+            elements.append({
+                "kind": "shape",
+                "type": "toggle",
+                "text": "",
+                "_direct_text": "",
+                "toggle_state": toggle_state,
+                "x": int(x),
+                "y": int(y),
+                "width": int(w),
+                "height": int(h),
+                "area": int(area),
+                "background_color": fill_hex,
+                "border_color": border_hex,
+                "border_width": int(border_width),
+                "border_radius": int(max(border_radius, round(h / 2))),
+                "text_color": "transparent",
+                "font_size": 0,
+                "font_weight": 0,
+                "text_align": "left",
+                "z_index": 11,
+                "linked_text_count": len(linked_texts),
+                "nesting_level": depth,
+            })
+            continue
+
         # Only classify as button if the region has a solid fill (not just colored text on dark bg)
         solidity = fill_solidity(roi)
         if solidity < 0.6:
@@ -1262,9 +1608,9 @@ def detect_shape_regions(image, text_regions, page_background):
 
         if bg_distance < 6 and border_width == 0 and not linked_texts:
             # Keep toggle candidates even if their track is close to page background.
+            # (previously this incorrectly skipped toggles entirely)
             if detect_toggle_switch_state(roi) is None:
                 continue
-            continue
 
         element_type = shape_type(x, y, w, h, len(linked_texts), width, height, fill_bgr, border_width, roi=roi, page_background=page_background)
         toggle_state = detect_toggle_switch_state(roi) if element_type == "toggle" else None
@@ -1338,6 +1684,7 @@ def detect_shape_regions(image, text_regions, page_background):
             "nesting_level": depth,
         })
 
+    # Process edge-detected contours (includes outlines, inputs, toggles, panels)
     return elements
 
 
@@ -1667,7 +2014,7 @@ def assign_relationships(elements):
         enriched["row_id"] = None
         indexed.append(enriched)
 
-    shape_candidates = [el for el in indexed if el["kind"] == "shape" and el["type"] in ("panel", "toolbar", "button", "input", "chip")]
+    shape_candidates = [el for el in indexed if el["kind"] == "shape" and el["type"] in ("panel", "toolbar", "button", "input", "chip", "toggle", "brand_logo")]
     shape_candidates.sort(key=lambda item: (item["area"], item["y"], item["x"]))
 
     for element in indexed:
@@ -1742,6 +2089,7 @@ def assign_relationships(elements):
 
 
 def prune_detected_elements(elements):
+    by_id = {el.get("id"): el for el in elements if "id" in el}
     child_counts = {el["id"]: 0 for el in elements}
     child_texts = {}
     page_background = "#ffffff"
@@ -1777,6 +2125,13 @@ def prune_detected_elements(elements):
         # Skip text elements that are inside a button/chip with _direct_text
         if element["kind"] == "text":
             parent_id = element.get("parent_id")
+            # UNIVERSAL: Drop low-confidence OCR gibberish even when it is inside a panel/toolbar.
+            text_val = (element.get("text") or "").strip()
+            conf = float(element.get("confidence", 0) or 0)
+            parent = by_id.get(parent_id) if parent_id is not None else None
+            parent_type = parent.get("type") if parent else None
+            if conf < 80 and text_val and looks_like_ocr_gibberish(text_val) and parent_type in (None, "panel", "toolbar", "card"):
+                continue
             if parent_id is not None and parent_id in shapes_with_direct_text:
                 continue
             
@@ -1842,6 +2197,10 @@ def prune_detected_elements(elements):
                 element["text"] = recleaned
                 text = recleaned
                 words = text.split()
+            # Drop likely OCR gibberish when confidence is low (photos/shadows often produce this).
+            conf = float(element.get("confidence", 0) or 0)
+            if conf < 80 and looks_like_ocr_gibberish(text):
+                continue
             # Drop pure OCR noise: short texts with high symbol ratio
             alpha_chars = sum(c.isalpha() for c in text)
             if len(text) <= 8 and alpha_chars / max(len(text), 1) < 0.5:
@@ -2360,10 +2719,14 @@ def measure_spacing(elements):
     # T4b: Alignment groups — find elements sharing left/right/center edges
     LEFT_TOL = 4
     for el in visible:
+        if "id" not in el:
+            continue
         el_left = el["x"]
         el_cx = el["x"] + el["width"] / 2
-        aligned_left = [o["id"] for o in visible if o is not el and abs(o["x"] - el_left) <= LEFT_TOL]
-        aligned_center = [o["id"] for o in visible if o is not el and abs((o["x"] + o["width"]/2) - el_cx) <= LEFT_TOL]
+        aligned_left = [o.get("id") for o in visible if o is not el and "id" in o and abs(o["x"] - el_left) <= LEFT_TOL]
+        aligned_left = [v for v in aligned_left if v is not None]
+        aligned_center = [o.get("id") for o in visible if o is not el and "id" in o and abs((o["x"] + o["width"]/2) - el_cx) <= LEFT_TOL]
+        aligned_center = [v for v in aligned_center if v is not None]
         if aligned_left:
             el["aligned_left_with"] = aligned_left[:4]
         if aligned_center:
@@ -2492,7 +2855,7 @@ def detect_glassmorphism(image, x, y, w, h, page_background):
     variance = float(np.std(roi.reshape(-1, 3).astype(np.float32)))
     bg_dist = float(np.linalg.norm(median_bgr - page_background))
     # Glass: moderate variance (not solid, not chaotic), close-ish to bg
-    return 8 < variance < 45 and 5 < bg_dist < 60
+    return bool(8 < variance < 45 and 5 < bg_dist < 60)
 
 
 # T8: Color inventory — extract surface + border colors
@@ -2762,18 +3125,20 @@ def _hex_luma(color):
 def reject_spurious_shapes(elements, img_w, img_h, page_bg_hex):
     """
     UNIVERSAL: Reject large false-positive panels that are basically background.
-    Criteria (per zone): height > 30% of zone height, no child text, fill ~ zone bg, no border.
+    Criteria (per zone): height > 30% of zone height, no children at all, fill ~ zone bg, no border.
     """
     shapes = [e for e in elements if e.get("kind") == "shape"]
     if not shapes:
         return elements
 
     child_text_count = {}
+    child_count = {}
     for e in elements:
-        if e.get("kind") != "text":
-            continue
         pid = e.get("parent_id")
         if pid is None:
+            continue
+        child_count[pid] = child_count.get(pid, 0) + 1
+        if e.get("kind") != "text":
             continue
         child_text_count[pid] = child_text_count.get(pid, 0) + 1
 
@@ -2818,7 +3183,8 @@ def reject_spurious_shapes(elements, img_w, img_h, page_bg_hex):
                 continue
             if (s.get("height", 0) or 0) <= zone_h * 0.30:
                 continue
-            if child_text_count.get(sid, 0) > 0:
+            # Keep real containers that have any children (shapes/images/text).
+            if child_count.get(sid, 0) > 0:
                 continue
             if (s.get("border_width", 0) or 0) > 0:
                 continue
@@ -2834,16 +3200,83 @@ def reject_spurious_shapes(elements, img_w, img_h, page_bg_hex):
     return [e for e in elements if e.get("id") not in drop_ids]
 
 
+def dedupe_similar_elements(elements):
+    """
+    Remove duplicate elements introduced by multi-pass OCR/shape tagging.
+    This runs late in the pipeline (after tag_dropdowns/tag_brand_logo) so it can
+    collapse near-identical selects/text blocks that overlap heavily.
+    """
+    def _area(e):
+        return int(max(1, (e.get("width", 1) or 1) * (e.get("height", 1) or 1)))
+
+    def _overlap_ratio(a, b):
+        ax0, ay0 = a.get("x", 0), a.get("y", 0)
+        ax1, ay1 = ax0 + a.get("width", 0), ay0 + a.get("height", 0)
+        bx0, by0 = b.get("x", 0), b.get("y", 0)
+        bx1, by1 = bx0 + b.get("width", 0), by0 + b.get("height", 0)
+        ox = max(0, min(ax1, bx1) - max(ax0, bx0))
+        oy = max(0, min(ay1, by1) - max(ay0, by0))
+        inter = ox * oy
+        if inter <= 0:
+            return 0.0
+        return inter / float(min(_area(a), _area(b)))
+
+    def _score(e):
+        # Prefer higher confidence/quality for text; otherwise prefer higher z-index then larger area.
+        return (
+            float(e.get("confidence", 0) or 0),
+            float(e.get("quality", 0) or 0),
+            int(e.get("z_index", 0) or 0),
+            _area(e),
+        )
+
+    kept = []
+    for e in sorted(elements, key=_score, reverse=True):
+        kind = e.get("kind")
+        typ = e.get("type")
+        txt = (e.get("text") or "").strip()
+        merged = False
+        for i, ex in enumerate(kept):
+            if ex.get("kind") != kind:
+                continue
+            if ex.get("type") != typ:
+                continue
+            if (ex.get("text") or "").strip() != txt:
+                continue
+            if _overlap_ratio(e, ex) > 0.55:
+                merged = True
+                break
+        if not merged:
+            kept.append(e)
+    return sorted(kept, key=lambda item: (item.get("z_index", 0), item.get("y", 0), item.get("x", 0)))
+
+
 def detect_ui_elements(image_path, device_pixel_ratio=1.0):
     image = cv2.imread(image_path)
     if image is None:
         return None
+
+    def infer_dpr_from_width(width_px):
+        # Heuristic: match common logical viewport widths multiplied by 2x/3x.
+        common = [1280, 1366, 1440, 1536, 1600, 1920]
+        for dpr in (3.0, 2.0):
+            for base in common:
+                target = base * dpr
+                if abs(width_px - target) <= max(12, base * 0.015):
+                    return dpr
+        # Fallback: very large widths are often 2x retina screenshots.
+        if width_px >= 2400 and width_px <= 4200:
+            return 2.0
+        return 1.0
 
     # Preprocessing: normalize retina / device pixel ratio so 1px in output ~= 1 logical px.
     try:
         dpr = float(device_pixel_ratio or 1.0)
     except Exception:
         dpr = 1.0
+    if dpr == 1.0:
+        # Auto-infer DPR when not provided (fixes tiny text on retina screenshots).
+        dpr = infer_dpr_from_width(image.shape[1])
     if dpr > 0 and dpr != 1.0:
         h0, w0 = image.shape[:2]
         new_w = max(1, int(round(w0 / dpr)))
@@ -2920,8 +3353,11 @@ def detect_ui_elements(image_path, device_pixel_ratio=1.0):
 
     # Tag dropdown elements and image placeholders using original (DPR-normalized) image
     elements = tag_dropdowns_and_images(elements, orig_image)
+    # Dedicated toggle scanner (catches low-contrast toggles).
+    elements.extend(scan_for_toggles(orig_image, existing_elements=elements, page_background=page_background))
     elements = tag_brand_logo(elements, orig_w, orig_h)
     elements = reject_spurious_shapes(elements, orig_w, orig_h, hex_from_bgr(page_background))
+    elements = dedupe_similar_elements(elements)
 
     # T6: Sample gradients for panels/backgrounds
     # T7: Flag glassmorphism regions
@@ -3404,7 +3840,7 @@ def detect():
             
         if detection is None:
             return jsonify({"error": "Could not read image"}), 400
-        return jsonify(detection)
+        return jsonify(make_json_safe(detection))
     except Exception as error:
         import traceback
         traceback.print_exc()
@@ -3417,11 +3853,24 @@ def detect_with_regions(image_path, device_pixel_ratio=1.0):
     if image is None:
         return None
 
+    def infer_dpr_from_width(width_px):
+        common = [1280, 1366, 1440, 1536, 1600, 1920]
+        for dpr in (3.0, 2.0):
+            for base in common:
+                target = base * dpr
+                if abs(width_px - target) <= max(12, base * 0.015):
+                    return dpr
+        if width_px >= 2400 and width_px <= 4200:
+            return 2.0
+        return 1.0
+
     # DPR normalization for region workflow
     try:
         dpr = float(device_pixel_ratio or 1.0)
     except Exception:
         dpr = 1.0
+    if dpr == 1.0:
+        dpr = infer_dpr_from_width(image.shape[1])
     if dpr > 0 and dpr != 1.0:
         h0, w0 = image.shape[:2]
         new_w = max(1, int(round(w0 / dpr)))
@@ -3545,6 +3994,8 @@ def detect_with_regions(image_path, device_pixel_ratio=1.0):
     merged = [normalize_component(element, w, h) for element in merged]
     merged = measure_spacing(merged)
     merged = fix_overlapping_text_zindex(merged)
+    merged.extend(scan_for_toggles(image, existing_elements=merged, page_background=page_background))
+    merged = dedupe_similar_elements(merged)
 
     color_inventory = extract_color_inventory(image, page_background)
     macro_layout = detect_macro_layout(image, page_background)
@@ -3613,6 +4064,6 @@ if __name__ == "__main__":
         if detection is None:
             print(json.dumps({"error": "Could not read image"}))
             sys.exit(1)
-        print(json.dumps(detection))
+        print(json.dumps(make_json_safe(detection)))
         sys.exit(0)
     app.run(host="0.0.0.0", port=5001, debug=False)

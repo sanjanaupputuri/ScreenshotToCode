@@ -3,8 +3,8 @@ import fs from 'fs';
 
 // Test both images with detailed analysis
 const TESTS = [
-  { name: 'test.png', file: 'test.png' },
-  { name: 'test2.png', file: 'test2.png' }
+  { name: 'Screenshot 2026-04-19 002540.png', file: 'Screenshot 2026-04-19 002540.png' },
+  { name: 'Screenshot 2026-04-19 002520.png', file: 'Screenshot 2026-04-19 002520.png' }
 ];
 
 async function analyzeOverlaps(htmlPath) {

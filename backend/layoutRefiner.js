@@ -192,7 +192,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const scale = OUTPUT_W / imgW;
 
   // Derive font size - prioritize actual detected font_size over height calculation
-  const scaledFs = (fs, minPx = 11, el = null, maxPx = 72) => {
+  const scaledFs = (fs, minPx = 11, el = null, maxPx = 96) => {
     // If element has actual font_size from OCR, use it directly without scaling
     if (el && el.font_size && el.font_size > 0) {
       const detected = Math.round(el.font_size);
@@ -227,8 +227,10 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const maxHeadingSize = Math.max(0, ...allEls
     .filter(e => e.font_weight >= 700)
     .map(e => e.h_pct ? Math.round(e.h_pct * imgH * 0.82) : (e.font_size || 0)));
-  const displayFont = maxHeadingSize >= 48 ? '"Bricolage Grotesque", "Inter"' : '"Inter"';
-  const bodyFont = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const displayFont = maxHeadingSize >= 48
+    ? "'Bricolage Grotesque', Inter, sans-serif"
+    : "Inter, sans-serif";
+  const bodyFont = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
   // --- Step 2: Build color system (plan Step 3) ---
   const colors = {
@@ -255,6 +257,81 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const zoneMap = {};
   for (const z of zones.zones) zoneMap[z.zone] = z;
 
+  function normalizeText(t) {
+    return String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function elementPxWidth(e) {
+    if (e.width_px) return Number(e.width_px) || 0;
+    if (e.width) return Number(e.width) || 0;
+    if (e.w_pct) return Math.round((Number(e.w_pct) || 0) * imgW);
+    return 0;
+  }
+
+  function elementPxHeight(e) {
+    if (e.height_px) return Number(e.height_px) || 0;
+    if (e.height) return Number(e.height) || 0;
+    if (e.h_pct) return Math.round((Number(e.h_pct) || 0) * imgH);
+    return 0;
+  }
+
+  // Replication plan: suppress repeated tiny visual placeholders and near-identical duplicates.
+  for (const zone of Object.values(zoneMap)) {
+    const items = Array.isArray(zone?.elements) ? zone.elements : [];
+    const tinyVisuals = items.filter((e) => {
+      const role = (e.role || '').toLowerCase();
+      if (!['image', 'brand_logo', 'icon'].includes(role)) return false;
+      const w = elementPxWidth(e);
+      const h = elementPxHeight(e);
+      return w > 0 && h > 0 && w <= 110 && h <= 110 && !normalizeText(e.text);
+    });
+
+    const tinyVisualKeysToDrop = new Set();
+    if (tinyVisuals.length >= 4) {
+      for (const e of tinyVisuals) {
+        const key = `${(e.role || '').toLowerCase()}|${Math.round((Number(e.x_pct) || 0) * 1000)}|${Math.round((Number(e.y_pct) || 0) * 1000)}|${Math.round((Number(e.width_pct || e.w_pct) || 0) * 1000)}|${Math.round((Number(e.h_pct) || 0) * 1000)}`;
+        tinyVisualKeysToDrop.add(key);
+      }
+    }
+
+    const byKey = new Map();
+    const deduped = [];
+    for (const e of items) {
+      const role = (e.role || '').toLowerCase();
+      const textKey = normalizeText(e.text);
+      const x = Math.round((Number(e.x_pct) || 0) * 1000);
+      const y = Math.round((Number(e.y_pct) || 0) * 1000);
+      const w = Math.round((Number(e.width_pct || e.w_pct) || 0) * 1000);
+      const h = Math.round((Number(e.h_pct) || 0) * 1000);
+      const key = `${role}|${textKey}|${x}|${y}|${w}|${h}`;
+      if (byKey.has(key)) continue;
+      byKey.set(key, true);
+      deduped.push(e);
+    }
+
+    zone.elements = deduped.filter((e) => {
+      const tinyKey = `${(e.role || '').toLowerCase()}|${Math.round((Number(e.x_pct) || 0) * 1000)}|${Math.round((Number(e.y_pct) || 0) * 1000)}|${Math.round((Number(e.width_pct || e.w_pct) || 0) * 1000)}|${Math.round((Number(e.h_pct) || 0) * 1000)}`;
+      if (tinyVisualKeysToDrop.has(tinyKey)) return false;
+
+      const role = (e.role || '').toLowerCase();
+      const text = normalizeText(e.text);
+      const wPct = Number(e.width_pct || e.w_pct) || 0;
+      const hPct = Number(e.h_pct) || 0;
+
+      // Drop giant strip/panel artifacts with no content.
+      if (role === 'panel' && !text && wPct >= 0.9 && hPct <= 0.09) return false;
+
+      // Drop tiny generic controls without readable text.
+      if ((role === 'button' || role === 'chip') && !text) {
+        const w = elementPxWidth(e);
+        const h = elementPxHeight(e);
+        if (w <= 70 && h <= 28) return false;
+      }
+
+      return true;
+    });
+  }
+
   // Declare early — used throughout all sections to track rendered texts
   const usedTexts = new Set();
 
@@ -276,7 +353,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const footer = zoneMap['footer'];
 
   // --- Step 4: NAV (plan Step 5) ---
-  const NAV_TAB_WORDS = /^(code|issues|pull|actions|projects|wiki|security|insights|settings|requests)$/i;
+  const NAV_TAB_WORDS = /^(code|issues|pull|actions|projects|wiki|security|insights|settings|requests|product|products|marketplace|learn|resources|login|contact|sales)$/i;
   const navBg = navbar?.bg && navbar.bg !== bg ? navbar.bg : (isDark ? darken(bg, 10) : '#ffffff');
   const navTextCol = isDark ? '#e5e7eb' : '#374151';
   const navEls = (navbar?.elements || []).sort((a,b) => (a.x_pct||0)-(b.x_pct||0));
@@ -300,7 +377,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   const textLogoHTML = logoEl
     ? `<span style="font-family:${displayFont};color:${logoEl.color||navTextCol};font-size:${Math.min(logoEl.font_size||18,22)}px;font-weight:700;white-space:nowrap;flex-shrink:0;">${esc(logoEl.text)}</span>`
     : '';
-  const fallbackLogoHTML = hasNavContent ? `<div style="width:32px;height:32px;background:${accent};border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">W</div>` : '';
+  const fallbackLogoHTML = (hasNavContent && !brandLogoHTML && !textLogoHTML) ? `<div style="width:32px;height:32px;background:${accent};border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">W</div>` : '';
   const logoHTML = brandLogoHTML || textLogoHTML || fallbackLogoHTML;
 
   const navHTML = hasNavContent ? `<nav style="background:${navBg};display:flex;align-items:center;padding:0 2rem;height:60px;gap:${zoneGap(navbar)};border-bottom:1px solid ${colors.border};position:sticky;top:0;z-index:100;">
@@ -349,26 +426,30 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const bodyEls = heroEls.filter(e => !headings.includes(e) && !subheadings.includes(e) && e.role !== 'button');
     const heroBtns = heroEls.filter(e => e.role === 'button' && e !== badgeEl);
 
-    // Group heading fragments by row (plan 1C: spatial relationships)
+    // Group heading fragments by row using pixel center (more stable than y_pct).
     const headingRows = [];
     for (const e of headings.sort((a,b) => (a.y_pct||0)-(b.y_pct||0))) {
-      const elH = e.h_pct || (e.font_size/900) || 0.06;
-      const row = headingRows.find(r => Math.abs(r.y-(e.y_pct||0)) < Math.max(elH*0.6, 0.01));
-      if (row) row.items.push(e); else headingRows.push({y:e.y_pct||0, items:[e]});
+      const hpx = Math.max(10, Math.round(((e.h_pct||0) * imgH) || (e.font_size||16)));
+      const cy = Math.round(((e.y_pct||0) * imgH) + (hpx / 2));
+      const row = headingRows.find(r => Math.abs(r.cy - cy) <= Math.max(10, Math.round(hpx * 0.35)));
+      if (row) row.items.push(e);
+      else headingRows.push({ cy, items: [e] });
     }
     const headingColor = headings[0]?.color || textColor;
     // Use the tallest heading element's h_pct for accurate font size
     const tallestHeading = headings.reduce((a, b) => (b.h_pct||0) > (a.h_pct||0) ? b : a, headings[0]);
-    const headingSize = scaledFs(tallestHeading?.font_size || 48, 24, tallestHeading);
+    const headingSize = scaledFs(tallestHeading?.font_size || 48, 24, tallestHeading, 96);
     const headingWeight = Math.max(...headings.map(e => e.font_weight||700));
     const headingLines = headingRows.map(r => r.items.sort((a,b)=>(a.x_pct||0)-(b.x_pct||0)).map(e=>e.text).join(' '));
+    const headingCssSize = headingSize >= 48 ? 'clamp(36px, 5vw, 80px)' : `${headingSize}px`;
+    const headingCssWeight = headingSize >= 48 ? 800 : headingWeight;
 
     // Badge above heading (e.g. "Made in Webflow" pill) — plan: custom icons → placeholder
     const badgeHTML = badgeEl ? `<div style="display:inline-flex;align-items:center;gap:6px;background:${badgeEl.bg||'#f3f4f6'};border:1px solid ${colors.border};border-radius:${badgeEl.border_radius||20}px;padding:5px 14px;font-size:13px;font-weight:500;color:${textColor};margin-bottom:1rem;">${esc(badgeEl.text)}</div>` : '';
 
     heroHTML = `<section style="background:${heroBg};padding:5rem 2rem 4rem;display:flex;flex-direction:column;align-items:center;text-align:center;">
   ${badgeHTML}
-  ${headingLines.length ? `<h1 style="font-family:${displayFont};color:${headingColor};font-size:${headingSize}px;font-weight:${headingWeight};line-height:1.1;letter-spacing:-0.03em;margin:0 0 1.5rem;max-width:900px;">${headingLines.map(esc).join('<br>')}</h1>` : ''}
+  ${headingLines.length ? `<h1 style="font-family:${displayFont};color:${headingColor};font-size:${headingCssSize};font-weight:${headingCssWeight};line-height:1.1;letter-spacing:-0.03em;margin:0 0 1.5rem;max-width:900px;">${headingLines.map(esc).join('<br>')}</h1>` : ''}
   ${subheadings.map(e => `<p style="color:${e.color||mutedColor};font-size:${scaledFs(e.font_size||18)}px;font-weight:${e.font_weight||400};line-height:1.6;margin:0 0 1rem;max-width:640px;">${esc(e.text)}</p>`).join('')}
   ${bodyEls.map(e => `<p style="color:${e.color||mutedColor};font-size:${e.font_size||16}px;line-height:1.6;margin:0 0 0.5rem;max-width:600px;">${esc(e.text)}</p>`).join('')}
   ${heroBtns.length ? `<div style="display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-top:1.5rem;">${heroBtns.map(e=>`<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||50}px;padding:14px 32px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}</div>` : ''}
@@ -401,15 +482,21 @@ function buildSemanticFromZones(zones, pageKind, image) {
     const mainEls = contentZone.elements.filter(e => (e.x_pct||0) < midX);
     const sideEls = contentZone.elements.filter(e => (e.x_pct||0) >= midX);
 
-    // Search inputs
-    const searchInputs = mainEls.filter(e =>
-      (e.role === 'input' || e.role === 'button') && /^search$/i.test((e.text||'').trim())
-    );
+    // Search inputs: only real input controls (avoid buttons/labels being treated as a search bar).
+    const searchInputs = mainEls.filter(e => {
+      if (e.role !== 'input') return false;
+      const t = (e.text || '').trim();
+      const looksLikeSearch = /^(search|find|search\.\.\.|search\s+.*|find\s+.*)$/i.test(t);
+      const wideEnough = (e.width_pct || 0) >= 0.22;
+      const tallEnough = (e.h_pct || 0) >= 0.03;
+      return looksLikeSearch && (wideEnough || tallEnough);
+    });
     searchInputs.forEach(e => { if (e.text) usedTexts.add(e.text); });
 
     // Filter buttons: must have text, not be badge, not already used
     const filterButtons = mainEls.filter(e =>
       e.role === 'button' && !searchInputs.includes(e) && e.text
+      && !/^search$/i.test((e.text || '').trim())
       && e !== badgeEl && !usedTexts.has(e.text)
     );
 
@@ -433,9 +520,10 @@ function buildSemanticFromZones(zones, pageKind, image) {
     );
 
     // Search bar
+    const searchPlaceholder = searchInputs[0]?.text ? String(searchInputs[0].text) : 'Search';
     const searchHTML = searchInputs.length ? `<div style="position:relative;width:100%;max-width:640px;margin:0 auto 1.5rem;">
   <svg style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${mutedColor}" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-  <input type="search" placeholder="Search" style="width:100%;background:${isDark?'rgba(255,255,255,0.06)':'#fff'};border:1px solid ${colors.border};border-radius:8px;padding:12px 16px 12px 42px;font-size:15px;color:${textColor};outline:none;box-shadow:0 1px 3px rgba(0,0,0,0.06);" />
+  <input type="search" placeholder="${esc(searchPlaceholder)}" style="width:100%;background:${isDark?'rgba(255,255,255,0.06)':'#fff'};border:1px solid ${colors.border};border-radius:8px;padding:12px 16px 12px 42px;font-size:15px;color:${textColor};outline:none;box-shadow:0 1px 3px rgba(0,0,0,0.06);" />
 </div>` : '';
 
     // Filter pills: use button texts, else footer category labels (Animation, Interactions etc.)
@@ -459,7 +547,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
   ${toggleEls.map(e => {
     const w = e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46;
     const h = e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24;
-    const isOn = (e.state === 'on');
+    const isOn = (e.state === 'on' || e.toggle_state === 'on' || /#(?:1a72f5|1877f2|0969da)/i.test(String(e.bg || '')));
     const dot = Math.max(10, h - 8);
     return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;">
       <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
@@ -470,9 +558,11 @@ function buildSemanticFromZones(zones, pageKind, image) {
     // Remaining content rows — only non-used, non-garbage elements
     const rows = [];
     for (const el of otherEls.sort((a,b)=>(a.y_pct||0)-(b.y_pct||0))) {
-      const elH = el.h_pct || 0.02;
-      const row = rows.find(r => Math.abs(r.y-(el.y_pct||0)) < Math.max(elH*0.6, 0.008));
-      if (row) row.items.push(el); else rows.push({y:el.y_pct||0, items:[el]});
+      const hpx = Math.max(10, Math.round(((el.h_pct||0) * imgH) || (el.font_size||14)));
+      const cy = Math.round(((el.y_pct||0) * imgH) + (hpx / 2));
+      const row = rows.find(r => Math.abs(r.cy - cy) <= Math.max(10, Math.round(hpx * 0.40)));
+      if (row) row.items.push(el);
+      else rows.push({ cy, items: [el] });
     }
     const renderEl = (e) => {
       const elColor = e.color || textColor;
@@ -481,8 +571,17 @@ function buildSemanticFromZones(zones, pageKind, image) {
       const elH = e.h_pct ? `${Math.round(e.h_pct * imgH * scale)}px` : 'auto';
       if (e.role === 'button') return `<button style="background:${e.bg||accent};color:${contrastColor(e.bg||accent)};border:none;border-radius:${e.border_radius||6}px;padding:0 20px;height:${elH};font-size:${Math.min(fs, 14)}px;font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`;
       if (e.role === 'input') return `<input placeholder="${esc(e.text||'')}" style="background:${e.bg||'#fff'};border:1px solid ${colors.border};border-radius:6px;padding:0 12px;height:${elH};width:${elW};font-size:${fs}px;outline:none;" />`;
-      if (e.role === 'image') return `<div style="width:${elW};height:${elH};background:#e8eaed;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
-      if (e.role === 'heading' || (e.font_weight >= 700 && fs >= 24)) return `<h2 style="color:${elColor};font-size:${fs}px;font-weight:${e.font_weight||700};margin:0;line-height:1.2;">${esc(e.text)}</h2>`;
+      if (e.role === 'image') {
+        const wp = e.w_pct ? Math.round(e.w_pct * OUTPUT_W) : 0;
+        const hp = e.h_pct ? Math.round(e.h_pct * imgH * scale) : 0;
+        if (wp > 0 && hp > 0 && wp < 120 && hp < 90) return '';
+        return `<div style="width:${elW};height:${elH};background:#e8eaed;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+      }
+      if (e.role === 'heading' || (e.font_weight >= 700 && fs >= 24)) {
+        const sizeCss = fs >= 48 ? 'clamp(28px, 3.4vw, 56px)' : `${fs}px`;
+        const weightCss = fs >= 48 ? 800 : (e.font_weight||700);
+        return `<h2 style="color:${elColor};font-size:${sizeCss};font-weight:${weightCss};margin:0;line-height:1.2;letter-spacing:${fs >= 48 ? '-0.03em' : 'normal'};">${esc(e.text)}</h2>`;
+      }
       if (e.role === 'subheading' || (e.font_weight >= 600 && fs >= 18)) return `<h3 style="color:${elColor};font-size:${fs}px;font-weight:${e.font_weight||600};margin:0;">${esc(e.text)}</h3>`;
       return `<span style="color:${elColor};font-size:${fs}px;font-weight:${e.font_weight||400};">${esc(e.text)}</span>`;
     };
@@ -526,7 +625,7 @@ function buildSemanticFromZones(zones, pageKind, image) {
     ${footerToggles.map(e => {
       const w = e.width_pct ? Math.round(e.width_pct * OUTPUT_W) : 46;
       const h = e.h_pct ? Math.round(e.h_pct * imgH * scale) : 24;
-      const isOn = (e.state === 'on');
+      const isOn = (e.state === 'on' || e.toggle_state === 'on' || /#(?:1a72f5|1877f2|0969da)/i.test(String(e.bg || '')));
       const dot = Math.max(10, h - 8);
       return `<button type="button" class="toggle${isOn?' on':''}" aria-pressed="${isOn}" style="width:${w}px;height:${h}px;border-radius:${Math.round(h/2)}px;background:${isOn?accent:'#d1d5db'};border:1px solid ${colors.border};padding:0 4px;display:flex;align-items:center;justify-content:flex-start;">
         <div class="dot" style="width:${dot}px;height:${dot}px;border-radius:999px;background:#fff;transform:${isOn?'translateX(18px)':'translateX(0)'};"></div>
@@ -576,10 +675,7 @@ input[type=search]::-webkit-search-cancel-button { display: none; }`;
   <style>${css}</style>
 </head>
 <body>
-${navHTML}
-${heroHTML}
-${contentHTML}
-${footerHTML}
+${[navHTML, heroHTML, contentHTML, footerHTML].filter(Boolean).join('\n')}
 <script>
 // Toggle switch animation (plan Step 10)
 document.querySelectorAll('.toggle').forEach(t => {
@@ -660,8 +756,18 @@ export class LayoutRefiner {
     sceneGraph = null,
     snippets = null,
   ) {
-    // Use zone-based generation but with exact font sizes preserved
-    const semanticHTML = zones?.zones?.length ? buildSemanticFromZones(zones, pageKind, image) : null;
+    // Use zone-based generation for simpler pages; for dense pages, keep absolute-position baseHTML to avoid jumbling.
+    const zoneElementCount = zones?.zones?.length
+      ? zones.zones.reduce((sum, z) => sum + (Array.isArray(z.elements) ? z.elements.length : 0), 0)
+      : 0;
+    const maxSemanticEls = Number(process.env.ZONE_SEMANTIC_MAX_ELEMENTS || 320);
+    // Default ON when zones exist; disable only when explicitly set to false.
+    const semanticToggle = (process.env.USE_ZONE_SEMANTIC || 'auto').toLowerCase();
+    const allowSemantic = semanticToggle !== 'false'
+      && Boolean(zones?.zones?.length)
+      && zoneElementCount > 0
+      && zoneElementCount <= maxSemanticEls;
+    const semanticHTML = allowSemantic ? buildSemanticFromZones(zones, pageKind, image) : null;
     let workingHTML = semanticHTML || baseHTML;
 
     // T15: Post-LLM validation — verify all Stage 1 text components are present in output

@@ -7,13 +7,15 @@ html, body, #root {
   padding: 0;
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  min-height: 100%;
 }
 
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  background: #eef2f7;
 }
 
 /* scrollbar styling */
@@ -29,4 +31,8 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #1877f2;
+}
+
+button, input, textarea, select {
+  font: inherit;
 }

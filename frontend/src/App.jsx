@@ -4,6 +4,7 @@ import { auth, googleProvider } from "./firebase";
 import HomeScreen from "./components/HomeScreen";
 import LoginScreen from "./components/LoginScreen";
 import ChatScreen from "./components/ChatScreen";
+import { shellStyles } from "./theme";
 
 export default function App() {
   const [screen, setScreen] = useState("home"); // "home" | "login" | "chat"
@@ -33,13 +34,7 @@ export default function App() {
   };
 
   return (
-    <div style={{
-      width: "100vw", height: "100vh", background: "#f0f2f5",
-      position: "relative", overflow: "hidden",
-      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
-    }}>
-
-
+    <div style={shellStyles.page}>
       {screen === "home" && (
         <HomeScreen onGetStarted={() => setScreen("login")} />
       )}
