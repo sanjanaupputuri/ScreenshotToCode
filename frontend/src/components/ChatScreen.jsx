@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
+<<<<<<< HEAD
 import {
   X, History, LogOut, Upload, ImageIcon,
   Clock, ChevronRight, Plus, Loader2
@@ -8,6 +9,9 @@ import Button from "./Button";
 import Skeleton from "./Skeleton";
 import CodeBlock from "./CodeBlock";
 import { toast } from "./Toast";
+=======
+import { theme } from "../theme";
+>>>>>>> refine_sanjana
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 
@@ -49,6 +53,7 @@ function PipelineProgress({ active }) {
   return (
     <div style={{ alignSelf: "flex-start", animation: "fadeUp 0.3s ease", maxWidth: 340 }}>
       <div style={{
+<<<<<<< HEAD
         padding: "0.9rem 1.1rem", borderRadius: 10,
         background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)"
       }}>
@@ -78,6 +83,61 @@ function PipelineProgress({ active }) {
           </div>
         ))}
       </div>
+=======
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "0.5rem 1rem", borderBottom: `1px solid ${theme.colors.border}`, background: "#f8f9fa"
+      }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["code", "preview"].map(t => (
+            <button key={t} onClick={() => setTab(t)} style={{
+              padding: "0.3rem 0.75rem", borderRadius: 6, border: "none",
+              background: tab === t ? theme.colors.accent : "transparent",
+              color: tab === t ? "#fff" : theme.colors.muted,
+              fontSize: "0.78rem", fontWeight: 600, cursor: "pointer"
+            }}>
+              {t === "code" ? "💻 Code" : "👁️ Preview"}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={copy} style={{
+            padding: "0.3rem 0.75rem", borderRadius: 6,
+            border: `1px solid ${theme.colors.border}`,
+            background: copied ? "#e6f4ea" : "#fff",
+            color: copied ? theme.colors.success : theme.colors.muted,
+            fontSize: "0.78rem", cursor: "pointer"
+          }}>
+            {copied ? "✓ Copied" : "📋 Copy"}
+          </button>
+          <button onClick={onSave} disabled={saving || saved} style={{
+            padding: "0.3rem 0.75rem", borderRadius: 6,
+            border: `1px solid ${theme.colors.border}`,
+            background: saved ? "#e6f4ea" : saving ? "#f0f2f5" : "#fff",
+            color: saved ? theme.colors.success : saving ? "#aaa" : theme.colors.muted,
+            fontSize: "0.78rem", cursor: saving || saved ? "default" : "pointer"
+          }}>
+            {saved ? "✓ Saved" : saving ? "Saving…" : "💾 Save"}
+          </button>
+        </div>
+      </div>
+
+      {tab === "code" ? (
+        <pre style={{
+          margin: 0, padding: "1rem", fontSize: "0.76rem", fontFamily: "monospace",
+          whiteSpace: "pre-wrap", overflowY: "auto", maxHeight: 600,
+          color: theme.colors.text, lineHeight: 1.6, background: "#fafafa"
+        }}>
+          {code}
+        </pre>
+      ) : (
+        <iframe
+          srcDoc={code}
+          title="preview"
+          sandbox="allow-scripts"
+          style={{ width: "100%", height: 600, border: "none", display: "block" }}
+        />
+      )}
+>>>>>>> refine_sanjana
     </div>
   );
 }
@@ -94,15 +154,28 @@ function Message({ msg, onSave, saving, saved, isNew }) {
       animation: isNew ? "fadeUp 0.3s ease" : "none"
     }}>
       {msg.image && (
+<<<<<<< HEAD
         <img src={msg.image} alt="Uploaded screenshot" style={{
           maxWidth: "100%", borderRadius: 10,
           border: "1px solid rgba(255,255,255,0.08)",
           maxHeight: 260, objectFit: "contain"
+=======
+        <img src={msg.image} alt="screenshot" style={{
+          maxWidth: "100%", borderRadius: 10, border: `1px solid ${theme.colors.border}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 300, objectFit: "contain"
+        }} />
+      )}
+      {!msg.image && msg.imageUrl && (
+        <img src={msg.imageUrl} alt="screenshot" style={{
+          maxWidth: "100%", borderRadius: 10, border: `1px solid ${theme.colors.border}`,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 300, objectFit: "contain"
+>>>>>>> refine_sanjana
         }} />
       )}
       {msg.code ? (
         <CodeBlock code={msg.code} onSave={onSave} saving={saving} saved={saved} />
       ) : (
+<<<<<<< HEAD
         <div
           role={msg.isError ? "alert" : undefined}
           aria-live={msg.isError ? "assertive" : undefined}
@@ -118,6 +191,15 @@ function Message({ msg, onSave, saving, saved, isNew }) {
             fontSize: "0.88rem", lineHeight: 1.65
           }}
         >
+=======
+        <div style={{
+          padding: "0.8rem 1.1rem", borderRadius: 10,
+          background: isUser ? theme.colors.accentSoft : msg.isError ? "#fff0f0" : "#fff",
+          color: msg.isError ? theme.colors.error : theme.colors.text,
+          border: isUser ? `1px solid ${theme.colors.accent}` : msg.isError ? "1px solid #ffcdd2" : `1px solid ${theme.colors.border}`,
+          fontSize: "0.92rem", boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
+        }}>
+>>>>>>> refine_sanjana
           {msg.text}
         </div>
       )}
@@ -126,6 +208,7 @@ function Message({ msg, onSave, saving, saved, isNew }) {
 }
 
 // ── HistoryPanel ──────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
   const [search, setSearch] = useState("");
   const filtered = history.filter(item =>
@@ -146,6 +229,26 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
           style={{ padding: "0.25rem", border: "none", background: "none" }}>
           <X size={15} />
         </button>
+=======
+function HistoryPanel({ history, loading, onClose, onLoad }) {
+  return (
+    <div style={{
+      position: "absolute", top: 0, right: 0, bottom: 0, width: 360,
+      background: theme.colors.panelStrong, backdropFilter: "blur(16px)",
+      borderLeft: `1px solid ${theme.colors.border}`, zIndex: 20,
+      display: "flex", flexDirection: "column",
+      boxShadow: "-4px 0 20px rgba(0,0,0,0.08)"
+    }}>
+      <div style={{
+        padding: "1.1rem 1.4rem", borderBottom: `1px solid ${theme.colors.border}`,
+        display: "flex", justifyContent: "space-between", alignItems: "center"
+      }}>
+        <span style={{ fontWeight: 800, color: theme.colors.accent }}>📜 Saved History</span>
+        <button onClick={onClose} style={{
+          background: "none", border: "none", cursor: "pointer",
+          color: theme.colors.muted, fontSize: "1.1rem"
+        }}>✕</button>
+>>>>>>> refine_sanjana
       </div>
 
       {/* Search */}
@@ -167,6 +270,7 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
 
       <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
         {loading ? (
+<<<<<<< HEAD
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
             {[80, 80, 80].map((h, i) => <Skeleton key={i} height={h} />)}
           </div>
@@ -190,6 +294,23 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
           }}
           onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.35)"; e.currentTarget.style.background = "rgba(99,102,241,0.06)"; }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)"; e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
+=======
+          <div style={{ textAlign: "center", color: theme.colors.muted, marginTop: "2rem" }}>Loading…</div>
+        ) : history.length === 0 ? (
+          <div style={{ textAlign: "center", color: theme.colors.muted, marginTop: "2rem", fontSize: "0.9rem" }}>
+            No saved generations yet
+          </div>
+        ) : history.map(item => (
+          <div key={item.id}
+            onClick={() => onLoad(item)}
+            style={{
+              padding: "0.85rem", borderRadius: 8, border: `1px solid ${theme.colors.border}`,
+              marginBottom: "0.6rem", background: "#f8f9fa", cursor: "pointer",
+              transition: "all 0.2s"
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.background = theme.colors.accentSoft; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.background = "#f8f9fa"; }}
+>>>>>>> refine_sanjana
           >
             {item.image_url && (
               <img
@@ -200,6 +321,7 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
                 onError={e => e.target.style.display = "none"}
               />
             )}
+<<<<<<< HEAD
             <div style={{ fontSize: "0.68rem", color: "var(--text-faint)" }}>
               {new Date(item.created_at).toLocaleString()}
             </div>
@@ -208,6 +330,13 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
               fontSize: "0.73rem", color: "var(--accent)", marginTop: 5, fontWeight: 600
             }}>
               Load generation <ChevronRight size={11} />
+=======
+            <div style={{ fontSize: "0.72rem", color: theme.colors.muted }}>
+              {new Date(item.created_at).toLocaleString()}
+            </div>
+            <div style={{ fontSize: "0.78rem", color: theme.colors.accent, marginTop: 3 }}>
+              Click to load →
+>>>>>>> refine_sanjana
             </div>
           </div>
         ))}
@@ -261,6 +390,7 @@ function HistoryPanel({ history, loading, onClose, onLoad, isMobile }) {
 // ── EmptyState ────────────────────────────────────────────────────────────────
 function EmptyState() {
   return (
+<<<<<<< HEAD
     <div style={{
       margin: "auto", textAlign: "center", color: "var(--text-faint)",
       animation: "fadeUp 0.5s ease", padding: "2rem"
@@ -292,6 +422,16 @@ function EmptyState() {
         ))}
       </div>
     </div>
+=======
+    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: theme.colors.muted }}>
+      <span style={{
+        width: 7, height: 7, borderRadius: "50%",
+        background: up ? "#10b981" : "#ef4444",
+        display: "inline-block"
+      }} />
+      {label}
+    </span>
+>>>>>>> refine_sanjana
   );
 }
 
@@ -487,6 +627,7 @@ export default function ChatScreen({ user, onLogout }) {
 
   return (
     <div style={{
+<<<<<<< HEAD
       position: "relative", display: "flex", flexDirection: "column",
       height: "100vh", background: "var(--bg)", color: "var(--text-primary)"
     }}>
@@ -500,6 +641,22 @@ export default function ChatScreen({ user, onLogout }) {
           <Logo size="sm" />
           <div style={{ width: 1, height: 18, background: "rgba(255,255,255,0.08)" }} />
           <div style={{ display: "flex", gap: 12 }}>
+=======
+      position: "relative", zIndex: 10, display: "flex",
+      flexDirection: "column", minHeight: "100vh", height: "100vh", color: theme.colors.text
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: "0.85rem 1.5rem", borderBottom: `1px solid ${theme.colors.border}`,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: theme.colors.panel, backdropFilter: "blur(10px)", flexShrink: 0
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: "1.1rem", fontWeight: 800, color: theme.colors.accent }}>
+            📸 Screenshot to Code
+          </span>
+          <div style={{ display: "flex", gap: 10 }}>
+>>>>>>> refine_sanjana
             <StatusDot label="Python" up={status.python_service} />
             <StatusDot label="Ollama" up={status.ollama} />
           </div>
@@ -507,6 +664,7 @@ export default function ChatScreen({ user, onLogout }) {
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {user?.photoURL && (
+<<<<<<< HEAD
             <img src={user.photoURL} alt={`${user.displayName || "User"} avatar`} style={{
               width: 28, height: 28, borderRadius: "50%",
               border: "2px solid rgba(99,102,241,0.4)"
@@ -527,10 +685,39 @@ export default function ChatScreen({ user, onLogout }) {
           <Button danger onClick={onLogout} aria-label="Sign out">
             <LogOut size={13} /> Sign out
           </Button>
+=======
+            <img src={user.photoURL} alt="avatar" style={{
+              width: 28, height: 28, borderRadius: "50%", border: `2px solid ${theme.colors.accent}`
+            }} />
+          )}
+          <span style={{ fontSize: "0.82rem", color: theme.colors.muted }}>
+            {user?.displayName || user?.email}
+          </span>
+          <button onClick={handleOpenHistory} style={{
+            background: "none", border: `1px solid ${theme.colors.border}`, borderRadius: 6,
+            color: theme.colors.muted, cursor: "pointer", fontSize: "0.82rem",
+            padding: "0.3rem 0.7rem", transition: "all 0.2s"
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.color = theme.colors.accent; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.color = theme.colors.muted; }}
+          >
+            📜 History
+          </button>
+          <button onClick={onLogout} style={{
+            background: "none", border: "none", color: theme.colors.muted,
+            cursor: "pointer", fontSize: "0.82rem"
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = theme.colors.error}
+          onMouseLeave={e => e.currentTarget.style.color = theme.colors.muted}
+          >
+            Sign out
+          </button>
+>>>>>>> refine_sanjana
         </div>
       </header>
 
       {/* Messages */}
+<<<<<<< HEAD
       <div
         role="log"
         aria-label="Conversation"
@@ -541,6 +728,34 @@ export default function ChatScreen({ user, onLogout }) {
         }}
       >
         {messages.length === 0 && <EmptyState />}
+=======
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: "auto", padding: "1.25rem 1.5rem",
+        display: "flex", flexDirection: "column", gap: "1rem",
+        background: "rgba(240,242,245,0.5)"
+      }}>
+        {messages.length === 0 && (
+        <div style={{ margin: "auto", textAlign: "center", color: theme.colors.muted }}>
+            <div style={{ fontSize: "3rem", marginBottom: 10 }}>📸</div>
+            <div style={{ fontWeight: 700, color: theme.colors.text, marginBottom: 6 }}>
+              Upload a UI screenshot to get started
+            </div>
+            <div style={{ fontSize: "0.85rem", maxWidth: 380, lineHeight: 1.6 }}>
+              The system will detect UI elements using OpenCV, match templates from SQLite,
+              and generate HTML/CSS code via Ollama.
+            </div>
+            <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+              {["🔍 OpenCV Detection", "🗄️ SQLite Templates", "🤖 Ollama Generation"].map(s => (
+              <span key={s} style={{
+                padding: "0.3rem 0.8rem", borderRadius: 20,
+                background: "rgba(24,119,242,0.08)", border: "1px solid rgba(24,119,242,0.2)",
+                  color: theme.colors.accent, fontSize: "0.78rem"
+              }}>{s}</span>
+            ))}
+            </div>
+          </div>
+        )}
+>>>>>>> refine_sanjana
 
         {messages.map((msg, idx) => (
           <Message
@@ -552,15 +767,37 @@ export default function ChatScreen({ user, onLogout }) {
           />
         ))}
 
+<<<<<<< HEAD
         <PipelineProgress active={loading} />
+=======
+        {loading && (
+        <div style={{ alignSelf: "flex-start" }}>
+              <div style={{
+              padding: "0.8rem 1.1rem", borderRadius: 10,
+              background: "#fff", border: `1px solid ${theme.colors.border}`,
+              color: theme.colors.muted, fontSize: "0.88rem",
+              display: "flex", alignItems: "center", gap: 8
+            }}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⚙️</span>
+              Detecting elements and generating code…
+            </div>
+          </div>
+        )}
+>>>>>>> refine_sanjana
 
         <div ref={messagesEndRef} />
       </div>
 
       {/* Upload bar */}
       <div style={{
+<<<<<<< HEAD
         padding: "0.9rem 1.5rem", borderTop: "1px solid rgba(255,255,255,0.06)",
         background: "rgba(10,10,15,0.92)", backdropFilter: "blur(14px)", flexShrink: 0
+=======
+        padding: "0.85rem 1.5rem", borderTop: `1px solid ${theme.colors.border}`,
+        display: "flex", gap: 10, alignItems: "center",
+        background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)", flexShrink: 0
+>>>>>>> refine_sanjana
       }}>
         <input
           ref={fileInputRef}
@@ -582,6 +819,7 @@ export default function ChatScreen({ user, onLogout }) {
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           style={{
+<<<<<<< HEAD
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
             padding: "0.9rem 1.5rem", borderRadius: 10,
             border: `2px dashed ${dragOver ? "rgba(99,102,241,0.55)" : loading ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.09)"}`,
@@ -590,6 +828,17 @@ export default function ChatScreen({ user, onLogout }) {
             fontSize: "0.86rem", cursor: loading ? "not-allowed" : "pointer",
             transition: "all 0.2s", textAlign: "center"
           }}
+=======
+            flex: 1, padding: "0.8rem", borderRadius: 8,
+            border: `2px dashed ${theme.colors.border}`,
+            background: loading ? "#f0f2f5" : "#fafafa",
+            color: loading ? "#aaa" : theme.colors.muted,
+            fontSize: "0.92rem", cursor: loading ? "not-allowed" : "pointer",
+            transition: "all 0.2s", fontFamily: "inherit"
+          }}
+          onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = theme.colors.accent; e.currentTarget.style.background = theme.colors.accentSoft; e.currentTarget.style.color = theme.colors.accent; } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = theme.colors.border; e.currentTarget.style.background = loading ? "#f0f2f5" : "#fafafa"; e.currentTarget.style.color = loading ? "#aaa" : theme.colors.muted; }}
+>>>>>>> refine_sanjana
         >
           {loading ? (
             <>

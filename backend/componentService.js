@@ -85,12 +85,16 @@ function normalizeElement(raw, index) {
   const border = Number(raw.border_width) > 0 && !isTransparent(raw.border_color)
     ? `${Math.round(raw.border_width)}px solid ${raw.border_color}`
     : 'none';
+  const rawFontSize = Number(raw.font_size) || 14;
   const fontSize =
-    textRole === 'title' ? Math.max(Number(raw.font_size) || 14, 18) :
-    textRole === 'muted' ? Math.max(11, (Number(raw.font_size) || 12) - 1) :
-    Number(raw.font_size) || 14;
+    textRole === 'title' ? Math.max(rawFontSize, 24) :
+    textRole === 'heading' ? Math.max(rawFontSize, 18) :
+    textRole === 'muted' ? Math.max(11, rawFontSize - 2) :
+    rawFontSize > 20 ? rawFontSize : // Preserve large text
+    rawFontSize;
   const fontWeight =
     textRole === 'title' ? Math.max(Number(raw.font_weight) || 600, 700) :
+    textRole === 'heading' ? Math.max(Number(raw.font_weight) || 600, 600) :
     textRole === 'nav' ? Math.max(Number(raw.font_weight) || 500, 600) :
     Number(raw.font_weight) || 400;
   const textColor =
@@ -142,13 +146,30 @@ function normalizeElement(raw, index) {
     fontSize,
     fontWeight,
     textAlign: raw.text_align || 'left',
-    zIndex: kind === 'text' ? 100 : (Number(raw.z_index) || 1),  // FORCE text to z=100
+    zIndex: kind === 'text' ? 100 : (Number(raw.z_index) || 1),
     confidence: Number(raw.confidence) || 0,
     quality: Number(raw.quality) || 0,
+    profileName: raw.profile_name || null,
+    profileScore: Number.isFinite(raw.profile_score) ? Number(raw.profile_score) : (raw.profile_score ?? null),
+    templateHtml: raw.template_html || null,
+    templateCss: raw.template_css || null,
     parentId: raw.parent_id ?? null,
     parentType: raw.parent_type ?? null,
     rowId: raw.row_id ?? null,
     layoutHint: raw.layout_hint || null,
+    // T13: Spacing values from measurement
+    spacingRight: Number(raw.spacing_right) || null,
+    spacingBottom: Number(raw.spacing_bottom) || null,
+    // T5: Repetition group
+    repeatGroupId: raw.repeat_group_id ?? null,
+    repeatIndex: raw.repeat_index ?? null,
+    // T6: Gradient
+    gradient: raw.gradient || null,
+    // T7: Glassmorphism
+    glassmorphism: raw.glassmorphism || false,
+    toggleState: raw.toggle_state || null,
+    // T16: Icon placeholder info
+    iconSize: (kind === 'shape' && (raw.type === 'icon' || raw.type === 'image')) ? { w: Number(raw.width), h: Number(raw.height), color: raw.background_color } : null,
   };
 }
 
@@ -157,6 +178,89 @@ function updateElementPercents(element, imageWidth, imageHeight) {
   element.y_pct = Number((element.y / imageHeight).toFixed(6));
   element.w_pct = Number((element.width / imageWidth).toFixed(6));
   element.h_pct = Number((element.height / imageHeight).toFixed(6));
+}
+
+function dedupeOverlappingElements(elements) {
+  // Remove near-identical duplicates that overlap heavily (common with multi-pass OCR/contours).
+  const kept = [];
+
+  const area = (e) => Math.max(1, (e.width || 1) * (e.height || 1));
+  const contains = (parent, child, margin = 2) =>
+    child.x >= parent.x - margin &&
+    child.y >= parent.y - margin &&
+    child.x + child.width <= parent.x + parent.width + margin &&
+    child.y + child.height <= parent.y + parent.height + margin;
+
+  const overlapRatio = (a, b) => {
+    const ox = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+    const oy = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+    const inter = ox * oy;
+    if (inter <= 0) return 0;
+    return inter / Math.min(area(a), area(b));
+  };
+
+  const pickWinner = (left, right) => {
+    const ls = Number.isFinite(left.profileScore) ? left.profileScore : -Infinity;
+    const rs = Number.isFinite(right.profileScore) ? right.profileScore : -Infinity;
+    if (ls !== rs) return ls > rs ? left : right;
+    const lc = Number(left.confidence) || 0;
+    const rc = Number(right.confidence) || 0;
+    if (lc !== rc) return lc > rc ? left : right;
+    return area(left) >= area(right) ? left : right;
+  };
+
+  // Inline-rendering semantic types — these shapes absorb their text children
+  const INLINE_SEMANTICS = new Set(['button', 'chip', 'input', 'select', 'toggle']);
+
+  for (const el of elements) {
+    let replaced = false;
+    for (let i = 0; i < kept.length; i++) {
+      const ex = kept[i];
+      const t1 = (el.text || '').trim();
+      const t2 = (ex.text || '').trim();
+
+      // Cross-kind: suppress orphan text node that is spatially inside/overlapping a shape
+      // that will render the same text inline (button, chip, input)
+      if (el.kind === 'text' && ex.kind === 'shape' && INLINE_SEMANTICS.has(ex.semanticType)) {
+        if (t1 && t2 && t1 === t2 && contains(ex, el, 8)) { replaced = true; break; }
+        if (t1 && t2 && t1 === t2 && overlapRatio(el, ex) > 0.40) { replaced = true; break; }
+      }
+      if (ex.kind === 'text' && el.kind === 'shape' && INLINE_SEMANTICS.has(el.semanticType)) {
+        if (t1 && t2 && t1 === t2 && contains(el, ex, 8)) { kept[i] = el; replaced = true; break; }
+        if (t1 && t2 && t1 === t2 && overlapRatio(el, ex) > 0.40) { kept[i] = el; replaced = true; break; }
+      }
+
+      if (el.kind !== ex.kind) continue;
+
+      // For text nodes: dedupe by matching text + spatial overlap, regardless of parentId/semanticType
+      if (el.kind === 'text') {
+        if (!t1 || t1 !== t2) continue;
+        const o = overlapRatio(el, ex);
+        if (o <= 0.30) continue;
+        // Prefer the one with a parentId (child placement is more accurate)
+        const winner = (el.parentId !== null && ex.parentId === null) ? el
+          : (ex.parentId !== null && el.parentId === null) ? ex
+          : pickWinner(el, ex);
+        kept[i] = winner;
+        replaced = true;
+        break;
+      }
+      // Only dedupe shapes when semantic types match and text matches (or both empty).
+      if ((el.semanticType || el.type) !== (ex.semanticType || ex.type)) continue;
+      if ((t1 || t2) && t1 !== t2) continue;
+      const o = overlapRatio(el, ex);
+      if (o <= 0.40) continue;
+      // Keep containments (icon inside input, text inside button, etc.)
+      if (contains(el, ex) || contains(ex, el)) continue;
+
+      const winner = pickWinner(el, ex);
+      kept[i] = winner;
+      replaced = true;
+      break;
+    }
+    if (!replaced) kept.push(el);
+  }
+  return kept;
 }
 
 function applyParentAnchoring(elements, image) {
@@ -252,12 +356,16 @@ function getRelativeMetrics(element, frame) {
 }
 
 function renderBackground(element) {
+  // T17: Gradient background support
+  const bgStyle = element.gradient
+    ? `linear-gradient(${element.gradient.direction}, ${element.gradient.stops.join(', ')})`
+    : element.background;
   return `<div class="screen-bg" style="${styleString({
     position: 'absolute',
     inset: '0',
-    background: element.background,
+    background: bgStyle,
     'z-index': element.zIndex,
-  })}"></div>`;
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}"></div>`;
 }
 
 function textMetricsForEstimate(text, fontSize, fontWeight = 400, maxWidth = Infinity) {
@@ -412,7 +520,7 @@ function selectInlineText(children = [], semanticType = 'shape') {
     const centerY = child.y + (child.height / 2);
     let placed = false;
     for (const row of rows) {
-      if (Math.abs(centerY - row.centerY) <= Math.max(8, row.maxHeight * 0.78, child.height * 0.78)) {
+      if (Math.abs(centerY - row.centerY) <= Math.max(4, Math.min(row.maxHeight, child.height) * 0.40)) {
         row.items.push(child);
         row.maxHeight = Math.max(row.maxHeight, child.height);
         row.centerY = row.items.reduce((acc, item) => acc + item.y + (item.height / 2), 0) / row.items.length;
@@ -461,15 +569,16 @@ function renderDetachedChildren(children, childrenByParent, frame = null, pageBg
   }).join('');
 }
 
-function renderInputControl(element, textValue) {
+function renderInputControl(element, textValue, frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
   const padX = Math.max(10, Math.round(element.height * 0.25));
   const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width - (padX * 2), element.height * 0.7, element.fontWeight || 400, 10);
   return `<input type="text" value="" placeholder="${escapeHtml(textValue)}" readonly style="${styleString({
     position: 'absolute',
-    left: px(element.x),
-    top: px(element.y),
-    width: px(element.width),
-    height: px(element.height),
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
     padding: `0 ${px(padX)}`,
     color: element.textColor,
     'font-size': px(fontSize),
@@ -480,17 +589,145 @@ function renderInputControl(element, textValue) {
     'border-radius': px(element.borderRadius),
     outline: 'none',
     'z-index': element.zIndex,
-  })}" />`;
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}" />`;
 }
 
-function renderInlineControl(element, textValue, tagName = 'button') {
+function renderSelectControl(element, textValue, frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
+  const fontSize = Math.max(11, Math.round(element.height * 0.38));
+  return `<select style="${styleString({
+    position: 'absolute',
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
+    padding: `0 ${px(Math.max(6, Math.round(element.height * 0.2)))}`,
+    color: element.textColor,
+    'font-size': px(fontSize),
+    'font-weight': element.fontWeight || 400,
+    background: element.background,
+    border: element.border !== 'none' ? element.border : '1px solid #d0d7de',
+    'border-radius': px(element.borderRadius),
+    outline: 'none',
+    'z-index': element.zIndex,
+    cursor: 'pointer',
+    appearance: 'auto',
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}"><option>${escapeHtml(textValue || '')}</option></select>`;
+}
+
+// T16: Icon → HTML comment with size/color + Lucide mapping suggestion
+const LUCIDE_ICON_MAP = [
+  [/search|find|query/i, 'Search'],
+  [/menu|hamburger|nav/i, 'Menu'],
+  [/close|dismiss|cancel/i, 'X'],
+  [/settings|gear|config/i, 'Settings'],
+  [/user|profile|account/i, 'User'],
+  [/home|house/i, 'Home'],
+  [/bell|notif/i, 'Bell'],
+  [/star|fav/i, 'Star'],
+  [/heart|like/i, 'Heart'],
+  [/plus|add/i, 'Plus'],
+  [/edit|pencil|pen/i, 'Pencil'],
+  [/trash|delete|remove/i, 'Trash2'],
+  [/arrow.*right|next/i, 'ArrowRight'],
+  [/arrow.*left|back/i, 'ArrowLeft'],
+  [/arrow.*down|expand/i, 'ChevronDown'],
+  [/check|done|tick/i, 'Check'],
+  [/info|about/i, 'Info'],
+  [/warn|alert/i, 'AlertTriangle'],
+  [/mail|email/i, 'Mail'],
+  [/link|url/i, 'Link'],
+  [/copy|clipboard/i, 'Copy'],
+  [/share/i, 'Share2'],
+  [/download/i, 'Download'],
+  [/upload/i, 'Upload'],
+  [/eye|view/i, 'Eye'],
+  [/lock|secure/i, 'Lock'],
+  [/code|dev/i, 'Code2'],
+  [/git|branch/i, 'GitBranch'],
+  [/image|photo|pic/i, 'Image'],
+  [/file|doc/i, 'FileText'],
+  [/folder|dir/i, 'Folder'],
+  [/calendar|date/i, 'Calendar'],
+  [/clock|time/i, 'Clock'],
+  [/map|location|pin/i, 'MapPin'],
+  [/phone|call/i, 'Phone'],
+  [/chart|graph|stat/i, 'BarChart2'],
+  [/filter/i, 'Filter'],
+  [/sort/i, 'ArrowUpDown'],
+  [/refresh|reload/i, 'RefreshCw'],
+  [/external|open/i, 'ExternalLink'],
+];
+
+function suggestLucideIcon(text, color, w, h) {
+  const t = (text || '').toLowerCase();
+  for (const [re, name] of LUCIDE_ICON_MAP) {
+    if (re.test(t)) return name;
+  }
+  // Size-based fallback
+  if (w <= 16 && h <= 16) return 'Dot';
+  return 'Square';
+}
+
+function renderIconPlaceholder(element, frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
+  const w = metrics.width, h = metrics.height;
+  const color = element.background || '#9ca3af';
+  const lucide = suggestLucideIcon(element.text, color, w, h);
+  const comment = `<!-- ICON: ${w}x${h}px color=${color} lucide="${lucide}" text="${element.text||''}" -->`;
+  return `${comment}<div style="${styleString({
+    position: 'absolute',
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(w),
+    height: px(h),
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'z-index': element.zIndex,
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}"><svg width="${Math.min(w,24)}" height="${Math.min(h,24)}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="3"/></svg></div>`;
+}
+
+function renderImagePlaceholder(element, frame = null) {
+  // T16: Small elements are icons, large are image placeholders
+  const isIcon = element.width <= 32 && element.height <= 32;
+  if (isIcon) return renderIconPlaceholder(element, frame);
+  // Skip tiny image placeholders with no background — likely detection noise
+  if (element.width < 20 || element.height < 20) return '';
+
+  const metrics = getRelativeMetrics(element, frame);
+  // T17: Gradient background support
+  const grad = element.gradient;
+  const bgStyle = grad
+    ? `linear-gradient(${grad.direction}, ${grad.stops.join(', ')})`
+    : (element.background || '#e8eaed');
+
+  return `<div style="${styleString({
+    position: 'absolute',
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
+    background: bgStyle,
+    border: '1px solid #d0d7de',
+    'border-radius': px(element.borderRadius),
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    overflow: 'hidden',
+    'z-index': element.zIndex,
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+}
+
+function renderInlineControl(element, textValue, tagName = 'button', frame = null) {
+  const metrics = getRelativeMetrics(element, frame);
   const fontSize = fitTextSize(textValue, element.fontSize || 14, element.width * 0.88, element.height * 0.8, element.fontWeight || 600, 9);
   return `<${tagName} ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
     position: 'absolute',
-    left: px(element.x),
-    top: px(element.y),
-    width: px(element.width),
-    height: px(element.height),
+    left: px(metrics.left),
+    top: px(metrics.top),
+    width: px(metrics.width),
+    height: px(metrics.height),
     display: 'flex',
     'align-items': 'center',
     'justify-content': 'center',
@@ -506,7 +743,7 @@ function renderInlineControl(element, textValue, tagName = 'button') {
     'border-radius': px(element.borderRadius),
     'z-index': element.zIndex,
     overflow: 'visible',
-  })}">${escapeHtml(textValue)}</${tagName}>`;
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}">${escapeHtml(textValue)}</${tagName}>`;
 }
 
 function renderShape(element, content, frame = null, tagName = 'div') {
@@ -520,22 +757,36 @@ function renderShape(element, content, frame = null, tagName = 'div') {
         : element.borderRadius;
   const overflow = (element.semanticType === 'avatar' || element.semanticType === 'icon') ? 'hidden' : 'visible';
   const hasChildren = Boolean(content);
-  // Toolbars get a subtle bottom border for visual separation
   const borderBottom = element.semanticType === 'toolbar' ? '1px solid #d0d7de' : undefined;
-  return `<${tagName} class="screen-shape screen-${element.type}" ${tagName === 'button' ? 'type="button"' : ''} style="${styleString({
+
+  // T17: Gradient background
+  const bgStyle = element.gradient
+    ? `linear-gradient(${element.gradient.direction}, ${element.gradient.stops.join(', ')})`
+    : element.background;
+
+  // T7: Glassmorphism flag
+  const backdropFilter = element.glassmorphism ? 'blur(12px)' : undefined;
+  const bgOpacity = element.glassmorphism ? (bgStyle + '99') : bgStyle;
+
+  // T18: Per-component hover state flagging via data attribute
+  const hoverFlag = (element.semanticType === 'button' || element.semanticType === 'chip' || element.semanticType === 'card')
+    ? ` data-hover="true"` : '';
+
+  return `<${tagName} class="screen-shape screen-${element.type}" ${tagName === 'button' ? 'type="button"' : ''}${hoverFlag} style="${styleString({
     position: 'absolute',
     left: px(metrics.left),
     top: px(metrics.top),
     width: px(metrics.width),
     height: px(metrics.height),
-    background: element.background,
+    background: bgOpacity,
+    'backdrop-filter': backdropFilter,
     border: element.border,
     'border-bottom': borderBottom,
     'border-radius': px(radius),
     overflow,
     'z-index': element.zIndex,
     isolation: hasChildren ? 'isolate' : undefined,
-  })}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${content || ''}</${tagName}>`;
+  })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${content || ''}</${tagName}>`;
 }
 
 function renderText(element, frame = null, pageBg = null) {
@@ -593,7 +844,7 @@ function renderText(element, frame = null, pageBg = null) {
     baseStyle.transform = 'translateY(-50%)';
   }
 
-  return `<div class="screen-text" style="${styleString(baseStyle)}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${escapeHtml(element.text)}</div>`;
+  return `<div class="screen-text" style="${styleString(baseStyle)}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}" data-parent-id="${element.parentId ?? ''}" data-row-id="${element.rowId ?? ''}">${escapeHtml(element.text)}</div>`;
 }
 
 function buildHierarchy(elements) {
@@ -654,31 +905,91 @@ function findNearestText(element, allElements) {
 function renderNode(element, childrenByParent, frame = null, pageBg = null, allElements = []) {
   if (element.kind === 'background') return renderBackground(element);
   
-  // Skip text elements that are already inlined in their parent button/chip/input
-  // These are rendered via renderInlineControl, not as separate text nodes
-  if (element.kind === 'text' && element.layoutHint === 'fill-center') {
-    return '';
+  if (element.kind === 'text' && element.layoutHint === 'fill-center') return '';
+  if (element.kind === 'text' && element.layoutHint === 'input-inline') return '';
+  if (element.kind === 'text') {
+    // Suppress OCR garbage text nodes (contain # markers or are excessively long)
+    if (element.text && (/[#@]/.test(element.text) || element.text.trim().split(/\s+/).length > 12)) return '';
+    return renderText(element, frame, pageBg);
   }
-  if (element.kind === 'text' && element.layoutHint === 'input-inline') {
-    return '';
+
+  // Image placeholder
+  if (element.semanticType === 'image' || element.type === 'image') {
+    return renderImagePlaceholder(element, frame);
   }
-  
-  if (element.kind === 'text') return renderText(element, frame, pageBg);
+
+  // brand_logo with no children → render as image placeholder (logo box)
+  if (element.semanticType === 'brand_logo' || element.type === 'brand_logo') {
+    const children = childrenByParent.get(element.sourceId) || [];
+    if (children.length === 0) return renderImagePlaceholder(element, frame);
+  }
 
   const children = childrenByParent.get(element.sourceId) || [];
+
+  // Suppress shapes whose own text is OCR garbage before doing anything else
+  const isGarbageText = (t) => {
+    if (!t) return false;
+    const words = t.trim().split(/\s+/);
+    return words.length > 5 || /[#@]/.test(t);
+  };
+  if (isGarbageText(element.text) && children.length === 0) return '';
+
   const inlineSelection = selectInlineText(children, element.semanticType);
   const inlineText = inlineSelection.text;
   const inlineTextNode = inlineSelection.node;
 
-  // Only drop truly invisible/noise shapes (generic 'shape' type with no children and no background)
+  // Toggle switch
+  if (element.semanticType === 'toggle' || element.type === 'toggle') {
+    const state = element.toggleState || (!isTransparent(element.background) ? 'on' : 'off');
+    const isOn = state === 'on';
+    const trackBg = isOn ? (isTransparent(element.background) ? '#4b5563' : element.background) : '#d1d5db';
+    const metrics = getRelativeMetrics(element, frame);
+    return `<button type="button" aria-pressed="${isOn}" style="${styleString({
+      position: 'absolute',
+      left: px(metrics.left),
+      top: px(metrics.top),
+      width: px(metrics.width),
+      height: px(metrics.height),
+      background: trackBg,
+      border: element.border,
+      'border-radius': px(element.borderRadius),
+      'z-index': element.zIndex,
+      cursor: 'pointer',
+    })}" data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="toggle"></button>`;
+  }
+
+  // Select / dropdown — only render if text looks like a real label (not OCR noise)
+  // Skip if semanticType was upgraded to button (profile match overrides raw type)
+  if ((element.semanticType === 'select' || element.type === 'select') && element.semanticType !== 'button') {
+    const label = inlineText || element.text || '';
+    // Skip selects with garbage/noise text: punctuation-suffixed, single common words, or too short
+    const NOISE_WORDS = /^(and|or|the|for|in|of|to|a|an|is|it|by|on|at|be|do|go|if|no|so|up|we|looking)$/i;
+    const looksLikeNoise = !label || /^[^a-z]{0,2}$/i.test(label) || /[,;]$/.test(label.trim()) || NOISE_WORDS.test(label.trim());
+    if (looksLikeNoise) return renderDetachedChildren(children, childrenByParent, frame, pageBg, allElements);
+    const textColor = inlineTextNode?.textColor || element.textColor || '#24292f';
+    return renderSelectControl({ ...element, textColor }, label, frame);
+  }
+
   if (children.length === 0) {
+    // Large panels/shapes with no children and no text are likely image regions
+    const isLargeImageRegion = element.width > 100 && element.height > 80
+      && (element.semanticType === 'panel' || element.type === 'panel')
+      && !isTransparent(element.background);
+    if (isLargeImageRegion) return renderImagePlaceholder(element, frame);
     const isTransparentShape = (element.type === 'shape' || element.semanticType === 'shape')
       && isTransparent(element.background)
       && element.border === 'none';
-    if (isTransparentShape) return '';
+    if (isTransparentShape && element.semanticType !== 'unknown') return '';
     if (element.semanticType === 'input' && element.width < 100) return '';
-    // Skip empty chips - they're likely false positives
     if (element.semanticType === 'chip' && !element.text) return '';
+    // Skip empty non-interactive shapes with no visible content
+    if (
+      !element.text &&
+      isTransparent(element.background) &&
+      element.border === 'none' &&
+      element.semanticType !== 'avatar' &&
+      element.semanticType !== 'image'
+    ) return '';
   }
 
   if (
@@ -686,30 +997,38 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
     inlineText &&
     (!CHIP_BADGE_PATTERN.test(inlineText.trim()) || inlineText.split(/\s+/).length > 2 || element.width > 120)
   ) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
+    return renderDetachedChildren(children, childrenByParent, frame, pageBg, allElements);
+  }
+
+  // Suppress buttons/chips whose label is OCR garbage (too long, contains # or @, or >5 words)
+  const isGarbageLabel = (t) => {
+    if (!t) return false;
+    const words = t.trim().split(/\s+/);
+    return words.length > 5 || /[#@]/.test(t);
+  };
+  if ((element.semanticType === 'button' || element.semanticType === 'chip') && isGarbageLabel(inlineText)) {
+    return renderDetachedChildren(children, childrenByParent, frame, pageBg, allElements);
   }
 
   if (element.semanticType === 'input' && inlineText && !INPUT_LABEL_PATTERN.test(inlineText)) {
-    return renderDetachedChildren(children, childrenByParent, element, pageBg, allElements);
+    return renderDetachedChildren(children, childrenByParent, frame, pageBg, allElements);
   }
 
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && inlineText) {
     const textColor = inlineTextNode?.textColor || element.textColor || '#111827';
-    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.34));
+    const fontSize = inlineTextNode?.fontSize || Math.min(14, Math.max(11, Math.round(element.height * 0.28)));
     const fontWeight = inlineTextNode?.fontWeight || 600;
-    // Ensure button text contrasts against button background
     const bg = element.background;
     const finalTextColor = (!isTransparent(bg) && (contrastRatio(textColor, bg) < 1.5 || colorDistance(textColor, bg) < 30))
       ? bestContrastText(bg)
       : textColor;
-    return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div');
+    return renderInlineControl({ ...element, textColor: finalTextColor, fontSize, fontWeight }, inlineText, element.semanticType === 'button' ? 'button' : 'div', frame);
   }
 
-  // Button with no text children — use direct_text from detection, then nearest orphan
   if ((element.semanticType === 'button' || element.semanticType === 'chip') && !inlineText) {
     const bg = element.background;
     const labelColor = isTransparent(bg) ? '#24292f' : bestContrastText(bg);
-    let label = element.text || '';  // Use _direct_text if available
+    let label = element.text || '';
     if (!label) {
       const isGreenCodeBtn = bg === '#1f883d' || bg === '#2da44e' || bg === '#1a7f37';
       if (isGreenCodeBtn) {
@@ -722,20 +1041,17 @@ function renderNode(element, childrenByParent, frame = null, pageBg = null, allE
         }
       }
     }
-    // Skip empty buttons/chips - they're likely false positives
-    if (!label || label.trim().length === 0) {
-      return '';
-    }
-    const fontSize = Math.max(11, Math.round(element.height * 0.34));
+    if (!label || label.trim().length === 0) return '';
+    const fontSize = Math.min(14, Math.max(10, Math.round(element.height * 0.28)));
     const finalColor = (!isTransparent(bg) && label) ? (contrastRatio(labelColor, bg) >= 1.5 ? labelColor : bestContrastText(bg)) : labelColor;
-    return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div');
+    return renderInlineControl({ ...element, textColor: finalColor, fontSize, fontWeight: 600 }, label, element.semanticType === 'button' ? 'button' : 'div', frame);
   }
 
   if (element.semanticType === 'input' && inlineText) {
     const textColor = inlineTextNode?.textColor || '#6b7280';
-    const fontSize = inlineTextNode?.fontSize || Math.max(12, Math.round(element.height * 0.3));
+    const fontSize = inlineTextNode?.fontSize || Math.min(16, Math.max(11, Math.round(element.height * 0.28)));
     const fontWeight = inlineTextNode?.fontWeight || 400;
-    return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText);
+    return renderInputControl({ ...element, textColor, fontSize, fontWeight }, inlineText, frame);
   }
 
   const content = children.map((child) => renderNode(child, childrenByParent, element, pageBg, allElements)).join('');
@@ -753,7 +1069,38 @@ export class ComponentService {
     const normalized = enriched
       .map((element, index) => normalizeElement(element, index))
       .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y) || (a.x - b.x));
-    applyParentAnchoring(normalized, image);
+
+    // Pre-assign text from overlapping text nodes to empty inline-rendering shapes
+    // so cross-kind deduplication can match and suppress the text node.
+    // Only assign short, clean labels (≤5 words, no OCR garbage).
+    const INLINE_SEMANTICS = new Set(['button', 'chip', 'input', 'select']);
+    const isCleanLabel = (t) => {
+      if (!t) return false;
+      const words = t.trim().split(/\s+/);
+      if (words.length > 5) return false;
+      if (/[#@]/.test(t)) return false;
+      if (/[,;]{1}/.test(t) && words.length > 2) return false;
+      return true;
+    };
+    const textNodes = normalized.filter(e => e.kind === 'text' && e.text && isCleanLabel(e.text));
+    for (const shape of normalized) {
+      if (!INLINE_SEMANTICS.has(shape.semanticType)) continue;
+      if (shape.text) continue;
+      for (const t of textNodes) {
+        // Text node center must be inside the shape (with small margin for near-misses)
+        const tcx = t.x + t.width / 2;
+        const tcy = t.y + t.height / 2;
+        const margin = Math.max(8, shape.height * 0.3);
+        if (tcx >= shape.x - margin && tcx <= shape.x + shape.width + margin &&
+            tcy >= shape.y - margin && tcy <= shape.y + shape.height + margin) {
+          shape.text = t.text;
+          break;
+        }
+      }
+    }
+
+    const deduped = dedupeOverlappingElements(normalized);
+    applyParentAnchoring(deduped, image);
 
     return {
       image: {
@@ -765,7 +1112,7 @@ export class ComponentService {
         pageKind: refinement?.page_kind || 'generic',
         notes: Array.isArray(refinement?.notes) ? refinement.notes : [],
       },
-      elements: normalized,
+      elements: deduped,
       zones: zones || null,
     };
   }
@@ -785,6 +1132,7 @@ export class ComponentService {
     const hierarchy = buildHierarchy(elements);
     const markup = hierarchy.roots
       .map((element) => renderNode(element, hierarchy.childrenByParent, null, bodyBg, elements))
+      .filter(Boolean)
       .join('\n    ');
 
     return `<!DOCTYPE html>
@@ -842,6 +1190,93 @@ export class ComponentService {
 `;
   }
 
+  static generateSnippets(processed) {
+    const image = processed.image || { width: 1440, height: 900, backgroundColor: '#f6f8fa' };
+    const elements = processed.elements || [];
+    const bodyBg = image.backgroundColor || '#f6f8fa';
+
+    const hierarchy = buildHierarchy(elements);
+
+    const injectAttrs = (html, attrs) => {
+      if (!html) return html;
+      if (html.includes('{{attrs}}')) return html.replace('{{attrs}}', attrs);
+      const idx = html.indexOf('>');
+      if (idx === -1) return html;
+      // If the tag is self-closing like <input ... />, attrs must appear before the closing.
+      return html.slice(0, idx) + ` ${attrs}` + html.slice(idx);
+    };
+
+    const renderTemplateSnippet = (element) => {
+      const template = element.templateHtml;
+      if (!template) return null;
+
+      const attrs = `data-source-id="${element.sourceId}" data-kind="${element.kind}" data-semantic-type="${element.semanticType}"`;
+
+      const baseStyle = {
+        position: 'absolute',
+        left: px(element.x),
+        top: px(element.y),
+        width: px(element.width),
+        height: px(element.height),
+        'z-index': element.zIndex,
+      };
+
+      const isText = element.kind === 'text';
+      const style = isText
+        ? styleString({
+          ...baseStyle,
+          color: element.textColor,
+          'font-size': px(element.fontSize),
+          'font-weight': element.fontWeight,
+          'line-height': '1.2',
+          'text-align': element.textAlign || 'left',
+          background: 'transparent',
+          border: 'none',
+          overflow: 'visible',
+        })
+        : styleString({
+          ...baseStyle,
+          background: element.background,
+          border: element.border,
+          'border-radius': px(element.borderRadius),
+          display: ['button', 'chip', 'toggle'].includes(element.semanticType) ? 'flex' : undefined,
+          'align-items': ['button', 'chip', 'toggle'].includes(element.semanticType) ? 'center' : undefined,
+          'justify-content': ['button', 'chip', 'toggle'].includes(element.semanticType) ? 'center' : undefined,
+          color: element.textColor,
+          'font-size': px(element.fontSize),
+          'font-weight': element.fontWeight,
+          'line-height': '1.2',
+        });
+
+      const textValue = escapeHtml(element.text || '');
+      const filled = template
+        .replace(/\{\{style\}\}/g, style)
+        .replace(/\{\{text\}\}/g, textValue)
+        .replace(/\{\{content\}\}/g, '');
+
+      return injectAttrs(filled, attrs);
+    };
+
+    return hierarchy.roots
+      .filter((element) => element.kind !== 'background')
+      .map((element) => {
+        const templated = renderTemplateSnippet(element);
+        const html = templated || renderNode(element, hierarchy.childrenByParent, null, bodyBg, elements);
+        return {
+          id: element.id,
+          sourceId: element.sourceId,
+          kind: element.kind,
+          semanticType: element.semanticType,
+          x: element.x,
+          y: element.y,
+          width: element.width,
+          height: element.height,
+          html,
+        };
+      })
+      .filter((snippet) => snippet.html && snippet.html.trim().length > 0);
+  }
+
   static generateSemanticHTML(processed) {
     const image = processed.image;
     const elements = processed.elements || [];
@@ -853,10 +1288,17 @@ export class ComponentService {
 
     const sorted = [...elements].sort((a, b) => (a.y - b.y) || (a.x - b.x));
 
-    // Band detection by y position
-    const navH = imgH * 0.12;
-    const tabH = imgH * 0.20;
-    const headerH = imgH * 0.30;
+    // Adaptive band detection - find actual nav/header positions
+    const toolbars = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'toolbar');
+    const firstToolbar = toolbars.find(t => t.y < imgH * 0.15);
+    const navH = firstToolbar ? (firstToolbar.y + firstToolbar.height + 10) : imgH * 0.12;
+    
+    // Find first large text (likely a heading) to determine header end
+    const largeTexts = sorted.filter(e => e.kind === 'text' && e.height > 20);
+    const firstHeading = largeTexts.find(t => t.y > navH);
+    const headerH = firstHeading ? Math.min(firstHeading.y + firstHeading.height + 40, imgH * 0.35) : imgH * 0.30;
+    
+    const tabH = navH + (headerH - navH) * 0.3;
     const footerY = imgH * 0.85;
 
     const navTexts = sorted.filter(e => e.kind === 'text' && e.y < navH);
@@ -866,14 +1308,29 @@ export class ComponentService {
     const footerTexts = sorted.filter(e => e.kind === 'text' && e.y >= footerY);
     const buttons = sorted.filter(e => e.kind === 'shape' && (e.semanticType === 'button' || e.semanticType === 'chip') && e.text);
     const inputs = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'input');
+    const toggles = sorted.filter(e => e.kind === 'shape' && e.semanticType === 'toggle');
 
     const navBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y < navH)?.background || (isDark ? '#1c1a2a' : '#24292f');
     const tabBg = sorted.find(e => e.kind === 'shape' && e.semanticType === 'toolbar' && e.y >= navH && e.y < tabH)?.background || bodyBg;
 
     const esc = escapeHtml;
     const col = (e) => e.textColor || textColor;
-    const fs = (e, min = 12) => `${Math.max(min, e.fontSize || 14)}px`;
+    // Use actual fontSize from element, with fallback to height-based calculation
+    const fs = (e, min = 12) => {
+      // Prefer actual detected fontSize over height-based calculation
+      if (e.fontSize && e.fontSize > 14) {
+        return `${Math.round(e.fontSize)}px`;
+      }
+      const fromHeight = e.height ? Math.round(e.height * 0.72) : 0;
+      const baseSize = fromHeight || e.fontSize || 14;
+      // Scale up large headings properly
+      if (baseSize > 24) return `${Math.round(baseSize * 1.2)}px`;
+      if (baseSize > 18) return `${Math.round(baseSize * 1.1)}px`;
+      return `${Math.max(min, baseSize)}px`;
+    };
     const fw = (e) => e.fontWeight || 400;
+    // Derive button height from element height
+    const btnH = (e) => e.height ? `${e.height}px` : '32px';
 
     // NAV
     const logoEl = navTexts.sort((a,b) => a.x - b.x)[0];
@@ -883,10 +1340,10 @@ export class ComponentService {
 
     const navHTML = `<nav style="background:${navBg};display:flex;align-items:center;padding:0 1.5rem;height:60px;gap:1rem;border-bottom:1px solid rgba(128,128,128,0.2);">
   ${logoEl ? `<span style="color:${col(logoEl)};font-size:${fs(logoEl,16)};font-weight:700;white-space:nowrap;">${esc(logoEl.text)}</span>` : ''}
-  ${navInputEls.map(e => `<input placeholder="${esc(e.text||'Search')}" style="background:${e.background};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 10px;font-size:13px;color:${col(e)};outline:none;width:200px;" />`).join('')}
+  ${navInputEls.map(e => `<input placeholder="${esc(e.text||'Search')}" style="background:${e.background};border:${e.border};border-radius:${e.borderRadius}px;padding:0 10px;height:${btnH(e)};font-size:${fs(e,13)};color:${col(e)};outline:none;width:200px;" />`).join('')}
   <div style="display:flex;align-items:center;gap:0.25rem;margin-left:auto;">
     ${navLinkEls.map(e => `<a href="#" style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};padding:5px 10px;text-decoration:none;white-space:nowrap;">${esc(e.text)}</a>`).join('')}
-    ${navBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:6px 14px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+    ${navBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:0 14px;height:${btnH(e)};font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </nav>`;
 
@@ -900,7 +1357,7 @@ export class ComponentService {
     const headerHTML = (headerTexts.length || headerBtnEls.length) ? `<div style="display:flex;align-items:center;gap:0.75rem;padding:1rem 1.5rem;flex-wrap:wrap;border-bottom:1px solid #d0d7de;">
   ${headerTexts.sort((a,b)=>a.x-b.x).map(e => `<span style="color:${col(e)};font-size:${fs(e,13)};font-weight:${fw(e)};white-space:nowrap;">${esc(e.text)}</span>`).join('')}
   <div style="margin-left:auto;display:flex;gap:0.5rem;flex-wrap:wrap;">
-    ${headerBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:5px 12px;font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
+    ${headerBtnEls.map(e => `<button style="background:${e.background};color:${e.textColor||bestContrastText(e.background)};border:${e.border};border-radius:${e.borderRadius}px;padding:0 12px;height:${btnH(e)};font-size:${fs(e,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(e.text)}</button>`).join('')}
   </div>
 </div>` : '';
 
@@ -910,27 +1367,48 @@ export class ComponentService {
     const rightTexts = bodyTexts.filter(e => e.x >= midX);
     const bodyBtnEls = buttons.filter(e => e.y >= headerH && e.y < footerY);
     const bodyInputEls = inputs.filter(e => e.y >= headerH && e.y < footerY);
+    const bodyToggleEls = toggles.filter(e => e.y >= headerH && e.y < footerY);
 
-    // Group left texts into rows
+    // Group left texts into rows — use element height as tolerance (60% overlap needed)
     const rows = [];
-    for (const el of [...leftTexts, ...bodyBtnEls.filter(e=>e.x<midX), ...bodyInputEls.filter(e=>e.x<midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x))) {
-      const row = rows.find(r => Math.abs(r.y - el.y) < Math.max(el.height||14, 20));
-      if (row) row.items.push(el);
-      else rows.push({ y: el.y, items: [el] });
+    for (const el of [...leftTexts, ...bodyBtnEls.filter(e=>e.x<midX), ...bodyInputEls.filter(e=>e.x<midX), ...bodyToggleEls.filter(e=>e.x<midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x))) {
+      const elH = el.height || 14;
+      const row = rows.find(r => Math.abs(r.y - el.y) < elH * 0.6);
+      if (row) {
+        row.items.push(el);
+      } else {
+        // Calculate spacing from previous row
+        const prevRow = rows[rows.length - 1];
+        const spacingTop = prevRow ? Math.max(0, el.y - (prevRow.y + (prevRow.maxHeight || 14))) : 0;
+        rows.push({ y: el.y, items: [el], spacingTop, maxHeight: elH });
+      }
+      // Update max height for the row
+      const currentRow = rows[rows.length - 1];
+      if (currentRow && elH > (currentRow.maxHeight || 0)) {
+        currentRow.maxHeight = elH;
+      }
     }
 
     const renderItem = (el) => {
       if (el.kind === 'text') return `<span style="color:${col(el)};font-size:${fs(el,12)};font-weight:${fw(el)};">${esc(el.text)}</span>`;
-      if (el.semanticType === 'input') return `<input placeholder="${esc(el.text||'')}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;padding:4px 8px;font-size:${fs(el,12)};color:${col(el)};outline:none;" />`;
-      return `<button style="background:${el.background};color:${el.textColor||bestContrastText(el.background)};border:${el.border};border-radius:${el.borderRadius}px;padding:5px 12px;font-size:${fs(el,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(el.text)}</button>`;
+      if (el.semanticType === 'input') return `<input placeholder="${esc(el.text||'')}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;padding:0 8px;height:${btnH(el)};font-size:${fs(el,12)};color:${col(el)};outline:none;" />`;
+      if (el.semanticType === 'toggle') {
+        const isOn = !isTransparent(el.background);
+        return `<button type="button" aria-pressed="${isOn}" style="background:${el.background};border:${el.border};border-radius:${el.borderRadius}px;width:${el.width}px;height:${el.height}px;cursor:pointer;"></button>`;
+      }
+      return `<button style="background:${el.background};color:${el.textColor||bestContrastText(el.background)};border:${el.border};border-radius:${el.borderRadius}px;padding:0 12px;height:${btnH(el)};font-size:${fs(el,12)};font-weight:600;cursor:pointer;white-space:nowrap;">${esc(el.text)}</button>`;
     };
 
     const mainHTML = `<div style="display:flex;gap:1.5rem;padding:1rem 1.5rem;max-width:1280px;margin:0 auto;">
   <div style="flex:1;min-width:0;">
-    ${rows.map(row => `<div style="display:flex;align-items:center;gap:0.75rem;padding:6px 0;flex-wrap:wrap;">${row.items.sort((a,b)=>a.x-b.x).map(renderItem).join('')}</div>`).join('\n    ')}
+    ${rows.map(row => {
+      const gap = row.items.reduce((m, e) => Math.max(m, e.spacingRight || 0), 0);
+      const mt = row.spacingTop > 0 ? Math.min(row.spacingTop, 24) : 0;
+      return `<div style="display:flex;align-items:center;gap:${gap||12}px;margin-top:${mt}px;flex-wrap:wrap;">${row.items.sort((a,b)=>a.x-b.x).map(renderItem).join('')}</div>`;
+    }).join('\n    ')}
   </div>
   ${rightTexts.length ? `<div style="width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:0.5rem;">
-    ${[...rightTexts, ...bodyBtnEls.filter(e=>e.x>=midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x)).map(renderItem).join('\n    ')}
+    ${[...rightTexts, ...bodyBtnEls.filter(e=>e.x>=midX), ...bodyToggleEls.filter(e=>e.x>=midX)].sort((a,b)=>(a.y-b.y)||(a.x-b.x)).map(renderItem).join('\n    ')}
   </div>` : ''}
 </div>`;
 
@@ -953,6 +1431,11 @@ export class ComponentService {
     button { transition: opacity 0.15s; }
     button:hover { opacity: 0.9; cursor: pointer; }
     input:focus { outline: 2px solid #0969da; }
+    /* T18: Per-component hover states */
+    [data-hover="true"] { transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s; }
+    [data-hover="true"]:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); cursor: pointer; }
+    [data-hover="true"]:active { transform: scale(0.97) translateY(0); }
+    .screen-card[data-hover="true"]:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
   </style>
 </head>
 <body>

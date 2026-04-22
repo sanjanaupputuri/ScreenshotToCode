@@ -7,9 +7,18 @@ const PYTHON_SERVICE = 'http://127.0.0.1:5001';
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PYTHON_SCRIPT = path.join(PROJECT_ROOT, 'detection_service.py');
 
-function runPythonDetection(imagePath) {
+function runPythonDetection(imagePath, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', [PYTHON_SCRIPT, '--once', imagePath], {
+    const args = [PYTHON_SCRIPT, '--once', imagePath];
+    const dpr = Number(options.devicePixelRatio);
+    if (Number.isFinite(dpr) && dpr > 0 && dpr !== 1) {
+      args.push('--dpr', String(dpr));
+    }
+    if (options.useRegions) {
+      args.push('--use-regions');
+    }
+
+    const child = spawn('python3', args, {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -54,17 +63,27 @@ function runPythonDetection(imagePath) {
 
 export class DetectionService {
 
-  static async detectElements(imagePath, useRegions = false) {
+  static async detectElements(imagePath, useRegionsOrOptions = false) {
     const absPath = path.isAbsolute(imagePath)
       ? imagePath
       : path.resolve(imagePath);
 
+    const options =
+      (typeof useRegionsOrOptions === 'object' && useRegionsOrOptions !== null)
+        ? useRegionsOrOptions
+        : { useRegions: useRegionsOrOptions };
+    const useRegions = Boolean(options.useRegions);
+
     try {
-      const data = await runPythonDetection(absPath);
+      const data = await runPythonDetection(absPath, {
+        devicePixelRatio: options.devicePixelRatio,
+        useRegions,
+      });
       return {
         components: data.components || [],
         image: data.image || null,
         zones: data.zones || null,
+        scene_graph: data.scene_graph || null,
       };
     } catch (cliError) {
       console.warn('Python CLI detection unavailable, using fallback:', cliError.message);

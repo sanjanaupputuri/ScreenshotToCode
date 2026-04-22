@@ -5,42 +5,38 @@ import fs from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Expected elements for test.png (GitHub page)
+// Expected elements for Screenshot 2026-04-19 002540.png (Webflow Showcase page)
 const TEST1_EXPECTED = {
-  name: 'test.png (GitHub)',
+  name: 'test.png (Webflow Showcase)',
   buttons: [
-    { text: 'Pin', color: '#f6f8fa' },
-    { text: 'Watch', color: '#f6f8fa' },
-    { text: 'Fork', color: '#f6f8fa' },
-    { text: 'Star', color: '#f6f8fa' },
-    { text: 'Code', color: '#1f883d' }, // green button
-    { text: 'Add file', color: '#f6f8fa' },
-  ],
-  inputs: [
-    { placeholder: 'Type / to search', color: '#f6f8fa' },
-    { placeholder: 'Go to file', color: '#ffffff' },
-  ],
-  background: '#f6f8fa',
-  containers: ['toolbar', 'panel', 'sidebar'],
-};
-
-// Expected elements for test2.png (Emergency Response Simulator)
-const TEST2_EXPECTED = {
-  name: 'test2.png (Emergency Simulator)',
-  buttons: [
-    { text: 'START SIMULATION', color: '#1976d2' }, // blue button
-    { text: 'EXIT', color: '#d32f2f' }, // red button
+    { text: 'Get started', color: '#1a72f5' },
+    { text: 'Discover', color: '#000000' },
+    { text: 'Animation', color: '#ededed' },
+    { text: 'Interactions', color: '#ededed' },
+    { text: 'Ecommerce', color: '#ededed' },
+    { text: 'Showcase your site', color: '#1a72f5' },
   ],
   inputs: [],
-  background: '#1a1a2e', // dark background (actual color from image)
-  containers: ['main-container'],
+  background: '#f9f9f9',
+  containers: ['panel', 'toolbar'],
+};
+
+// Expected elements for Screenshot 2026-04-19 002520.png (Webflow Directory page)
+const TEST2_EXPECTED = {
+  name: 'test2.png (Webflow Directory)',
+  buttons: [
+    { text: 'Submit', color: '#000000' },
+    { text: 'Log in', color: '#ffffff' },
+  ],
+  inputs: [
+    { placeholder: 'Search', color: '#ffffff' },
+  ],
+  background: '#ffffff',
+  containers: ['toolbar', 'panel'],
   texts: [
-    'EMERGENCY RESPONSE SIMULATOR',
-    'Hyderabad Emergency Services Training',
-    'Multi-City Support',
-    'Advanced Pathfinding',
-    'Real-time Simulation',
-    'Performance Analytics',
+    'Explore',
+    'Directory',
+    'Search',
   ],
 };
 
@@ -162,8 +158,8 @@ async function runTests() {
   console.log('  SCREENSHOT-TO-CODE ACCURACY TEST SUITE');
   console.log('█'.repeat(70));
 
-  const test1Path = join(__dirname, 'test.png');
-  const test2Path = join(__dirname, 'test2.png');
+  const test1Path = join(__dirname, 'Screenshot 2026-04-19 002540.png');
+  const test2Path = join(__dirname, 'Screenshot 2026-04-19 002520.png');
 
   if (!fs.existsSync(test1Path)) {
     console.log('❌ test.png not found!');

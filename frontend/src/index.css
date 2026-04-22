@@ -144,3 +144,7 @@ body {
   .feature-section { padding: 0 1.25rem 3rem !important; }
   .chat-header-name { display: none; }
 }
+
+button, input, textarea, select {
+  font: inherit;
+}
